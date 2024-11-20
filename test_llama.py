@@ -8,7 +8,7 @@ def test_llama_model():
     device = "cuda" if torch.cuda.is_available() else 'cpu'
     tokenizer = BertTokenizerFast('./vocab.txt')
 
-    text = "hello world hello qibin"
+    text = "hello 你好 こんにちは 안녕하세요"
     input_ids = tokenizer.encode(text, add_special_tokens=False)
     input_ids = torch.tensor(input_ids).long().unsqueeze(0).to(device)
 
