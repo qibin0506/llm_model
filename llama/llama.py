@@ -88,7 +88,7 @@ class Attention(nn.Module):
         if mask is not None:
             attn_scores.masked_fill_(mask == torch.tensor(False), -torch.inf)
 
-        attn_weights = self.dropout(attn_scores.softmax(-1))
+        attn_weights = self.dropout(attn_scores.softmax(-1, dtype=torch.float32))
         # (batch, num_heads, seq_len, head_size)
         attn = attn_weights @ value_states
         # (batch, seq_len, num_heads, head_size)
