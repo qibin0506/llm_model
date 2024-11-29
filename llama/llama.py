@@ -22,6 +22,8 @@ class MLP(nn.Module):
 class Attention(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
+        assert config.num_attention_heads % config.num_key_value_heads == 0
+        
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_size = self.hidden_size // self.num_heads
@@ -38,6 +40,7 @@ class Attention(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 mask=None,
+                attention_mask_type = 'add',
                 position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None):
         batch, seq_len, _ = x.shape
 
@@ -86,7 +89,10 @@ class Attention(nn.Module):
         # (batch, num_heads, seq_len, seq_len)
         attn_scores = (self.scale * query_states) @ key_states.transpose(-1, -2)
         if mask is not None:
-            attn_scores.masked_fill_(mask == torch.tensor(False), -torch.inf)
+            if attention_mask_type == 'add':
+                attn_scores = attn_scores + mask
+            else:
+                attn_scores.masked_fill_(mask == torch.tensor(False), -torch.inf)
 
         attn_weights = self.dropout(attn_scores.softmax(-1, dtype=torch.float32))
         # (batch, num_heads, seq_len, head_size)
@@ -106,6 +112,8 @@ class DecoderLayer(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
 
+        self.att_mask_type = config.attention_mask_type
+
         self.attn_norm = RMSNorm(config.hidden_size)
         self.attn = Attention(config)
 
@@ -115,8 +123,12 @@ class DecoderLayer(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None):
-        mask = torch.tril(torch.ones(x.shape[1], x.shape[1]), diagonal=0).to(x.device)
-        x = self.attn(self.attn_norm(x), mask=mask, position_embeddings=position_embeddings) + x
+        if self.att_mask_type == 'add':
+            mask = torch.triu(torch.full_like(torch.ones(x.shape[1], x.shape[1]), -torch.inf), diagonal=1).to(x.device)
+        else:
+            mask = torch.tril(torch.ones(x.shape[1], x.shape[1]), diagonal=0).to(x.device)
+
+        x = self.attn(self.attn_norm(x), mask=mask, attention_mask_type=self.att_mask_type, position_embeddings=position_embeddings) + x
         x = self.mlp(self.mlp_norm(x)) + x
 
         return x
