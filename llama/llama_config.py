@@ -12,3 +12,4 @@ class Config:
     rope_theta: float = 10000.0
     attention_dropout: float = 0.1
     num_hidden_layers: int = 32
+    attention_mask_type: str = 'add'
