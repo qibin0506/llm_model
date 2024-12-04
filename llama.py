@@ -163,7 +163,7 @@ class LlamaModel(nn.Module):
         """
         :param input_ids: input tokens
         :param attention_mask: input mask for ignore padding, shape is (batch, seq_len)
-            eg: [[1, 1, 1, 0], [1, 1, 1, 1]]
+            eg: [[true, true, true, false], [true, true, true, true]]
         :param past_key_values:
         :param use_cache:
         :return:
