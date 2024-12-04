@@ -18,26 +18,29 @@ def get_llama_config(vocab_size):
         max_position_embeddings=100)
 
 
-def test_llama_model(use_kv_cache=True):
+def test_llama_model(test_train=True):
     llama: LlamaModel = LlamaModel(config=get_llama_config(vocab_size=1000))
-    input_ids = torch.ones((1, 3), dtype=torch.long)
+    pad_token_id = 0
 
-    kv_cache: KVCache = None
+    if test_train:
+        input_ids = torch.tensor([[1, 2, 3], [2, pad_token_id, pad_token_id]], dtype=torch.long)
+        # [[true, true, true], [true, false, false]]
+        attention_mask = input_ids != pad_token_id
+        logits, _ = llama(input_ids, attention_mask=attention_mask)
+    else:
+        input_ids = torch.ones((1, 3), dtype=torch.long)
+        kv_cache: KVCache = None
+        llama.eval()
+        with torch.no_grad():
+            for _ in range(10):
+                logits, kv_cache = llama(input_ids, past_key_values=kv_cache, use_cache=True)
+                logits = logits[:, -1, :]
+                out_token = logits.argmax(dim=-1, keepdim=True)
+                print(out_token)
 
-    llama.eval()
-    with torch.no_grad():
-        for _ in range(10):
-            logits, kv_cache = llama(input_ids, past_key_values=kv_cache, use_cache=use_kv_cache)
-            logits = logits[:, -1, :]
-            out_token = logits.argmax(dim=-1, keepdim=True)
-            print(out_token)
-
-            if use_kv_cache:
                 input_ids = out_token
-            else:
-                input_ids = torch.concat((input_ids, out_token), dim=-1)
 
 
 if __name__ == '__main__':
-    test_llama_model(use_kv_cache=True)
+    test_llama_model(test_train=True)
 ```
