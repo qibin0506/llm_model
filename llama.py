@@ -157,8 +157,17 @@ class LlamaModel(nn.Module):
 
     def forward(self,
                 input_ids: torch.Tensor,
+                attention_mask: Optional[torch.Tensor] = None,
                 past_key_values: Optional[KVCache] = None,
                 use_cache: bool = False) -> Tuple[torch.Tensor, Optional[KVCache]]:
+        """
+        :param input_ids: input tokens
+        :param attention_mask: input mask for ignore padding, shape is (batch, seq_len)
+            eg: [[1, 1, 1, 0], [1, 1, 1, 1]]
+        :param past_key_values:
+        :param use_cache:
+        :return:
+        """
         batch_size, seq_len = input_ids.shape
 
         if use_cache and past_key_values is None:
@@ -175,10 +184,11 @@ class LlamaModel(nn.Module):
         position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
-        # (batch_size, past_seen_tokens+seq_len)
-        attention_mask = torch.ones(
-            (batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device
-        )
+        if attention_mask is None:
+            # (batch_size, past_seen_tokens+seq_len)
+            attention_mask = torch.ones(
+                (batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device
+            )
 
         # (batch_size, 1, seq_len, past_seen_tokens+seq_len)
         attention_mask = prepare_decoder_attention_mask(
