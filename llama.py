@@ -186,6 +186,7 @@ class LlamaModel(nn.Module):
 
         if attention_mask is None:
             # (batch_size, past_seen_tokens+seq_len)
+            # all true, no paddings for mask
             attention_mask = torch.ones(
                 (batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device
             )
