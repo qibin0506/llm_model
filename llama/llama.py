@@ -154,7 +154,7 @@ class LlamaModel(nn.Module):
 
         self.head_norm = RMSNorm(config.hidden_size)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module):
@@ -168,6 +168,7 @@ class LlamaModel(nn.Module):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
+
 
     def forward(self,
                 input_ids: torch.Tensor,
