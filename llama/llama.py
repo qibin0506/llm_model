@@ -176,12 +176,16 @@ class LlamaModel(nn.Module):
                 past_key_values: Optional[KVCache] = None,
                 use_cache: bool = False) -> Tuple[torch.Tensor, Optional[KVCache]]:
         """
-        :param input_ids: input tokens
-        :param attention_mask: input mask for ignore padding, shape is (batch, seq_len)
-            eg: [[true, true, true, false], [true, true, true, true]]
-        :param past_key_values:
-        :param use_cache:
-        :return:
+        Args:
+            input_ids (`torch.Tensor`):
+                input tokens
+            attention_mask (`torch.Tensor`, *optional*, default is None)
+                input mask for ignore padding, shape is (batch, seq_len),
+                eg: [[true, true, true, false], [true, true, true, true]]
+            past_key_values (`KVCache`, *optional*, default is None):
+                inference key value cache, when use_cache == True, will return KVCache on first forward
+            use_cache (`bool`, default is False)
+                use KVCache or not
         """
         batch_size, seq_len = input_ids.shape
 
