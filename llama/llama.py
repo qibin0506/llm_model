@@ -6,6 +6,7 @@ from .rmsnorm import RMSNorm
 from .rope import RotaryEmbedding, apply_rotary_pos_emb
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
+from .soft_moe import SoftMoELayerWrapper
 
 
 class MLP(nn.Module):
@@ -41,11 +42,13 @@ class Attention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=False)
         self.dropout = nn.Dropout(p=config.attention_dropout)
 
-    def forward(self,
-                hidden_states: torch.Tensor,
-                position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                past_key_values: Optional[KVCache] = None) -> torch.Tensor:
+    def forward(
+            self,
+            hidden_states: torch.Tensor,
+            position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[KVCache] = None
+    ) -> torch.Tensor:
         batch, seq_len, _ = hidden_states.shape
 
         # (batch, seq_len, num_heads*head_size)
@@ -122,13 +125,18 @@ class DecoderLayer(nn.Module):
         self.attn = Attention(config, layer_idx)
 
         self.mlp_norm = RMSNorm(config.hidden_size)
-        self.mlp = MLP(config)
+        if config.num_experts > 0:
+            self.mlp = SoftMoELayerWrapper(config=config, layer=MLP)
+        else:
+            self.mlp = MLP(config)
 
-    def forward(self,
-                hidden_states: torch.Tensor,
-                position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                past_key_values: Optional[KVCache] = None) -> torch.Tensor:
+    def forward(
+            self,
+            hidden_states: torch.Tensor,
+            position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[KVCache] = None
+    ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.attn(
                       hidden_states=self.attn_norm(hidden_states),
@@ -170,11 +178,13 @@ class LlamaModel(nn.Module):
                 module.weight.data[module.padding_idx].zero_()
 
 
-    def forward(self,
-                input_ids: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None,
-                past_key_values: Optional[KVCache] = None,
-                use_cache: bool = False) -> Tuple[torch.Tensor, Optional[KVCache]]:
+    def forward(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[KVCache] = None,
+            use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[KVCache]]:
         """
         Args:
             input_ids (`torch.Tensor`):

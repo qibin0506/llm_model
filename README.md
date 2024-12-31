@@ -15,7 +15,10 @@ def get_llama_config(vocab_size):
         num_hidden_layers=2,
         num_attention_heads=4,
         num_key_value_heads=2,
-        max_position_embeddings=100)
+        max_position_embeddings=100,
+        num_experts=6,
+        slots_per_expert=1
+    )
 
 
 def test_llama_model(test_train=True):
