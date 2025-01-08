@@ -12,6 +12,6 @@ __all__ = [
     'LlamaModel',
     'LlamaDecoderLayer',
     'LlamaConfig',
-    'RoPEConfig'
+    'RoPEConfig',
     'KVCache'
 ]
