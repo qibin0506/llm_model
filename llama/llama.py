@@ -169,7 +169,7 @@ class Attention(nn.Module):
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
 
-        attn_weights = self.dropout(attn_scores.softmax(-1, dtype=torch.float32))
+        attn_weights = self.dropout(attn_scores.softmax(-1))
         # (batch, num_heads, seq_len, head_size)
         attn = attn_weights @ value_states
         # (batch, seq_len, num_heads, head_size)
