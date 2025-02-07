@@ -169,7 +169,10 @@ class Attention(nn.Module):
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
 
-        attn_weights = self.dropout(attn_scores.softmax(-1))
+        attn_weights = attn_scores.softmax(-1)
+        if self.training:
+            attn_weights = self.dropout(attn_weights)
+
         # (batch, num_heads, seq_len, head_size)
         attn = attn_weights @ value_states
         # (batch, seq_len, num_heads, head_size)
