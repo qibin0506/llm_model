@@ -43,7 +43,7 @@ class RoPEConfig:
             *,
             rope_type: str = 'default',
             rope_theta: float = 10000.0,
-            factor: float = 0.1,
+            factor: float = 1.0,
             attention_factor: float = None,
             beta_fast: float = 32,
             beta_slow: float = 1,
