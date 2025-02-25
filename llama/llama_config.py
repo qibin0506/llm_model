@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 
 class RoPEConfig:
@@ -64,6 +64,24 @@ class RoPEConfig:
         self.high_freq_factor = high_freq_factor
 
 
+class MoEConfig:
+    """
+        MoE Config
+        Args:
+            num_experts (`int`, *optional*, default is 0)
+                number of moe experts, 0 means without moe
+            slots_per_expert (`int`, *optional*, default is 1)
+                number of token slots per expert
+    """
+    def __init__(
+            self,
+            num_experts: int = 0,
+            slots_per_expert: int = 1
+    ):
+        self.num_experts = num_experts
+        self.slots_per_expert = slots_per_expert
+
+
 class Config:
     """
         llama config
@@ -75,6 +93,8 @@ class Config:
                 the hidden size
             intermediate_size (`int`, *optional*, default is 11008):
                 the intermediate_size
+            num_hidden_layers (`int`, *optional*, default is 32)
+                decoder layers count
             num_attention_heads (`int`, *optional*, default is 32):
                 the attention head count
             num_key_value_heads (`int`, *optional*, default is num_attention_heads):
@@ -84,16 +104,13 @@ class Config:
                 else will use Group Query Attention (GQA)
             max_position_embeddings (`int`, *optional*, default is 2048):
                 max position embeddings
-            rope_config (`RoPEConfig`)
-                RoPE configurations
             attention_dropout (`float`, *optional*, default is 0.1)
                 dropout for attention
-            num_hidden_layers (`int`, *optional*, default is 32)
-                decoder layers count
-            num_experts (`int`, *optional*, default is 0)
-                number of moe experts, 0 means without moe
-            slots_per_expert (`int`, *optional*, default is 1)
-                number of token slots per expert
+            rope_config (`RoPEConfig`)
+                RoPE configurations
+            attention_implementation (`str`, default is sdpa)
+                if attention_implementation='sdpa' will use F.scaled_dot_product_attention
+                if attention_implementation='default' will use pure implementation
         """
 
     def __init__(
@@ -106,10 +123,10 @@ class Config:
             num_attention_heads: int = 32,
             num_key_value_heads: int = 32,
             max_position_embeddings: int = 2048,
-            rope_config: RoPEConfig = RoPEConfig(),
             attention_dropout: float = 0.1,
-            num_experts: int = 0,
-            slots_per_expert: int = 1,
+            attention_implementation = 'sdpa',
+            rope_config: RoPEConfig = RoPEConfig(),
+            moe_config: Optional[MoEConfig] = None
     ):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -118,7 +135,7 @@ class Config:
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
         self.max_position_embeddings = max_position_embeddings
-        self.rope_config = rope_config
         self.attention_dropout = attention_dropout
-        self.num_experts = num_experts
-        self.slots_per_expert = slots_per_expert
+        self.attention_implementation = attention_implementation
+        self.rope_config = rope_config
+        self.moe_config = moe_config

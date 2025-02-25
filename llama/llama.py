@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from typing import Optional, Tuple
+from packaging import version
 from .llama_config import Config
 from .rmsnorm import RMSNorm
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
@@ -93,6 +94,9 @@ class Attention(nn.Module):
         super().__init__()
         assert config.num_attention_heads % config.num_key_value_heads == 0
 
+        self.sdpa_attention = (config.attention_implementation == 'sdpa'
+                               and hasattr(torch.nn.functional, 'scaled_dot_product_attention'))
+
         self.layer_idx = layer_idx
         
         self.hidden_size = config.hidden_size
@@ -107,6 +111,21 @@ class Attention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=False)
         self.dropout = nn.Dropout(p=config.attention_dropout)
+
+    def _sdpa_kernel(self, enable_flash: bool=True, enable_math: bool=True, enable_mem_efficient: bool=True):
+        if version.parse(torch.__version__).release < version.parse("2.3").release:
+            return torch.backends.cuda.sdp_kernel(
+                enable_flash=enable_flash, enable_math=enable_math, enable_mem_efficient=enable_mem_efficient
+            )
+
+        backends = []
+        if enable_flash:
+            backends += [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+        if enable_math:
+            backends += [torch.nn.attention.SDPBackend.MATH]
+        if enable_mem_efficient:
+            backends += [torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]
+        return torch.nn.attention.sdpa_kernel(backends)
 
     def forward(
             self,
@@ -164,19 +183,25 @@ class Attention(nn.Module):
                     batch, self.num_key_value_heads * self.num_key_value_groups, t.shape[-2], self.head_size),
                 (key_states, value_states))
 
-        # (batch, num_heads, q_seq_len, k_seq_len)
-        attn_scores = (self.scale * query_states) @ key_states.transpose(-1, -2)
-        if attention_mask is not None:
-            attn_scores = attn_scores + attention_mask
+        if self.sdpa_attention:
+            with self._sdpa_kernel():
+                attn = torch.nn.functional.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=attention_mask)
+            attn = attn.transpose(1, 2)
+        else:
+            # (batch, num_heads, q_seq_len, k_seq_len)
+            attn_scores = (self.scale * query_states) @ key_states.transpose(-1, -2)
+            if attention_mask is not None:
+                attn_scores = attn_scores + attention_mask
 
-        attn_weights = attn_scores.softmax(-1)
-        if self.training:
-            attn_weights = self.dropout(attn_weights)
+            attn_weights = attn_scores.softmax(-1)
+            if self.training:
+                attn_weights = self.dropout(attn_weights)
 
-        # (batch, num_heads, seq_len, head_size)
-        attn = attn_weights @ value_states
-        # (batch, seq_len, num_heads, head_size)
-        attn = attn.permute(0, 2, 1, 3)
+            # (batch, num_heads, seq_len, head_size)
+            attn = attn_weights @ value_states
+            # (batch, seq_len, num_heads, head_size)
+            attn = attn.permute(0, 2, 1, 3)
+
         # (batch, seq_len, num_heads*head_size)
         attn = attn.reshape(batch, seq_len, -1)
 
@@ -194,7 +219,7 @@ class DecoderLayer(nn.Module):
         self.attn = Attention(config, layer_idx)
 
         self.mlp_norm = RMSNorm(config.hidden_size)
-        if config.num_experts > 0:
+        if config.moe_config and config.moe_config.num_experts > 0:
             self.mlp = SoftMoELayerWrapper(config=config, layer=MLP)
         else:
             self.mlp = MLP(config)

@@ -52,8 +52,8 @@ class SoftMoELayerWrapper(nn.Module):
         super().__init__()
 
         self.dim = config.hidden_size
-        self.num_experts = config.num_experts
-        self.slots_per_expert = config.slots_per_expert
+        self.num_experts = config.moe_config.num_experts
+        self.slots_per_expert = config.moe_config.slots_per_expert
         self.normalize = normalize
 
         # Initialize phi and normalization scaling factor
