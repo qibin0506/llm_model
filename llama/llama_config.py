@@ -68,18 +68,42 @@ class MoEConfig:
     """
         MoE Config
         Args:
-            num_experts (`int`, *optional*, default is 0)
-                number of moe experts, 0 means without moe
-            slots_per_expert (`int`, *optional*, default is 1)
-                number of token slots per expert
+            num_experts_per_tok (`int`, *optional*, defaults to None):
+                Number of selected experts, None means dense model.
+            n_routed_experts (`int`, *optional*, defaults to None):
+                Number of routed experts, None means dense model.
+            n_shared_experts (`int`, *optional*, defaults to None):
+                Number of shared experts, None means dense model.
+            moe_intermediate_size (`int`, *optional*, defaults to 1407):
+                Dimension of the MoE representations.
+            scoring_func (`str`, *optional*, defaults to 'softmax'):
+                Method of computing expert weights.
+            aux_loss_alpha (`float`, *optional*, defaults to 0.001):
+                Auxiliary loss weight coefficient.
+            seq_aux = (`bool`, *optional*, defaults to True):
+                Whether to compute the auxiliary loss for each individual sample.
+            norm_topk_prob (`bool`, *optional*, defaults to False):
+                Whether to normalize the weights of the routed experts.
     """
     def __init__(
             self,
-            num_experts: int = 0,
-            slots_per_expert: int = 1
+            num_experts_per_tok: Optional[int] = None,
+            n_routed_experts: Optional[int] = None,
+            n_shared_experts: Optional[int] = None,
+            moe_intermediate_size: int = 1407,
+            scoring_func: str = 'softmax',
+            aux_loss_alpha: float = 0.001,
+            seq_aux: bool = True,
+            norm_topk_prob: bool = False,
     ):
-        self.num_experts = num_experts
-        self.slots_per_expert = slots_per_expert
+        self.num_experts_per_tok = num_experts_per_tok
+        self.n_routed_experts = n_routed_experts
+        self.n_shared_experts = n_shared_experts
+        self.moe_intermediate_size = moe_intermediate_size
+        self.scoring_func = scoring_func
+        self.aux_loss_alpha = aux_loss_alpha
+        self.seq_aux = seq_aux
+        self.norm_topk_prob = norm_topk_prob
 
 
 class Config:

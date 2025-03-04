@@ -1,25 +1,29 @@
+from typing import Optional, Tuple, List, Dict
+from packaging import version
+
 import torch
 from torch import nn
-from typing import Optional, Tuple
-from packaging import version
+import torch.nn.functional as F
+
 from .llama_config import Config
 from .rmsnorm import RMSNorm
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
-from .soft_moe import SoftMoELayerWrapper
+from .sparse_moe import MoE
 
 
 class MLP(nn.Module):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, intermediate_size: Optional[int] = None):
         super().__init__()
+        config_intermediate_size = config.intermediate_size if intermediate_size is None else intermediate_size
 
-        self.gate_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
-        self.up_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
-        self.down_proj = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
+        self.gate_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
+        self.up_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
+        self.down_proj = nn.Linear(config_intermediate_size, config.hidden_size, bias=False)
         self.activation = nn.SiLU()
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.down_proj(self.activation(self.gate_proj(hidden_states)) * self.up_proj(hidden_states))
 
 
@@ -185,7 +189,14 @@ class Attention(nn.Module):
 
         if self.sdpa_attention:
             with self._sdpa_kernel():
-                attn = torch.nn.functional.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=attention_mask)
+                dropout_p = self.dropout.p if self.training else 0.0
+                attn = F.scaled_dot_product_attention(
+                    query=query_states,
+                    key=key_states,
+                    value=value_states,
+                    dropout_p=dropout_p,
+                    attn_mask=attention_mask
+                )
             attn = attn.transpose(1, 2)
         else:
             # (batch, num_heads, q_seq_len, k_seq_len)
@@ -219,8 +230,11 @@ class DecoderLayer(nn.Module):
         self.attn = Attention(config, layer_idx)
 
         self.mlp_norm = RMSNorm(config.hidden_size)
-        if config.moe_config and config.moe_config.num_experts > 0:
-            self.mlp = SoftMoELayerWrapper(config=config, layer=MLP)
+        if (config.moe_config and
+                config.moe_config.num_experts_per_tok and
+                config.moe_config.n_routed_experts and
+                config.moe_config.n_shared_experts):
+            self.mlp = MoE(config=config, layer=MLP)
         else:
             self.mlp = MLP(config)
 
@@ -230,7 +244,7 @@ class DecoderLayer(nn.Module):
             position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
             attention_mask: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         residual = hidden_states
         hidden_states = self.attn(
                       hidden_states=self.attn_norm(hidden_states),
@@ -240,9 +254,16 @@ class DecoderLayer(nn.Module):
         )
 
         hidden_states = hidden_states + residual
-        hidden_states = self.mlp(self.mlp_norm(hidden_states)) + hidden_states
 
-        return hidden_states
+        if isinstance(self.mlp, MoE):
+            mlp_states, aux_loss = self.mlp(self.mlp_norm(hidden_states))
+        else:
+            mlp_states = self.mlp(self.mlp_norm(hidden_states))
+            aux_loss = None
+
+        hidden_states = mlp_states + hidden_states
+
+        return hidden_states, aux_loss
 
 
 class LlamaModel(nn.Module):
@@ -278,7 +299,7 @@ class LlamaModel(nn.Module):
             attention_mask: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False
-    ) -> Tuple[torch.Tensor, Optional[KVCache]]:
+    ) -> Dict[str, any]:
         """
         Args:
             input_ids (`torch.Tensor`):
@@ -290,6 +311,14 @@ class LlamaModel(nn.Module):
                 inference key value cache, when use_cache == True, will return KVCache on first forward
             use_cache (`bool`, default is False)
                 use KVCache or not
+
+        Returns:
+            logits
+                the model logits output
+            past_key_values:
+                inference key value cache, when use_cache == True, will return KVCache on first forward
+            aux_loss:
+                aux loss when use MOE, else None
         """
         batch_size, seq_len = input_ids.shape
 
@@ -324,16 +353,24 @@ class LlamaModel(nn.Module):
         )
 
         hidden_states = inputs_embeds
+        aux_losses: List[torch.Tensor] = []
+
         for layer in self.layers:
-            hidden_states = layer(
+            hidden_states, aux_loss = layer(
                 hidden_states=hidden_states,
                 position_embeddings=position_embeddings,
                 attention_mask=attention_mask,
                 past_key_values=past_key_values)
 
+            if aux_loss:
+                aux_losses.append(aux_loss)
+
         hidden_states = self.head_norm(hidden_states)
         head = self.lm_head(hidden_states)
 
-        return head, past_key_values
-
+        return {
+            'logits': head,
+            'past_key_values': past_key_values,
+            'aux_loss': None if not aux_losses else sum(aux_losses)
+        }
 
