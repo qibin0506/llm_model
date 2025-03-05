@@ -230,10 +230,16 @@ class DecoderLayer(nn.Module):
         self.attn = Attention(config, layer_idx)
 
         self.mlp_norm = RMSNorm(config.hidden_size)
-        if (config.moe_config and
-                config.moe_config.num_experts_per_tok and
-                config.moe_config.n_routed_experts and
-                config.moe_config.n_shared_experts):
+
+        use_moe = (
+                config.moe_config
+                and config.moe_config.num_experts_per_tok
+                and config.moe_config.n_routed_experts
+                and config.moe_config.n_shared_experts
+                and layer_idx < config.moe_n_dense_layer
+        )
+
+        if use_moe:
             self.mlp = MoE(config=config, layer=MLP)
         else:
             self.mlp = MLP(config)

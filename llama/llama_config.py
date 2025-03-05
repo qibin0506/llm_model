@@ -74,8 +74,6 @@ class MoEConfig:
                 Number of routed experts, None means dense model.
             n_shared_experts (`int`, *optional*, defaults to None):
                 Number of shared experts, None means dense model.
-            moe_intermediate_size (`int`, *optional*, defaults to 1407):
-                Dimension of the MoE representations.
             scoring_func (`str`, *optional*, defaults to 'softmax'):
                 Method of computing expert weights.
             aux_loss_alpha (`float`, *optional*, defaults to 0.001):
@@ -90,7 +88,6 @@ class MoEConfig:
             num_experts_per_tok: Optional[int] = None,
             n_routed_experts: Optional[int] = None,
             n_shared_experts: Optional[int] = None,
-            moe_intermediate_size: int = 1407,
             scoring_func: str = 'softmax',
             aux_loss_alpha: float = 0.001,
             seq_aux: bool = True,
@@ -99,7 +96,6 @@ class MoEConfig:
         self.num_experts_per_tok = num_experts_per_tok
         self.n_routed_experts = n_routed_experts
         self.n_shared_experts = n_shared_experts
-        self.moe_intermediate_size = moe_intermediate_size
         self.scoring_func = scoring_func
         self.aux_loss_alpha = aux_loss_alpha
         self.seq_aux = seq_aux
@@ -117,6 +113,10 @@ class Config:
                 the hidden size
             intermediate_size (`int`, *optional*, default is 11008):
                 the intermediate_size
+            moe_intermediate_size (`int`, *optional*, defaults to 1407):
+                Dimension of the MoE representations.
+            moe_n_dense_layer (`int`, default is 1)
+                n layers use dense for moe
             num_hidden_layers (`int`, *optional*, default is 32)
                 decoder layers count
             num_attention_heads (`int`, *optional*, default is 32):
@@ -143,6 +143,8 @@ class Config:
             vocab_size: int = 21128,
             hidden_size: int = 4096,
             intermediate_size: int = 11008,
+            moe_intermediate_size: int = 1407,
+            moe_n_dense_layer = 1,
             num_hidden_layers: int = 32,
             num_attention_heads: int = 32,
             num_key_value_heads: int = 32,
@@ -155,6 +157,8 @@ class Config:
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
+        self.moe_intermediate_size = moe_intermediate_size
+        self.moe_n_dense_layer = moe_n_dense_layer
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads

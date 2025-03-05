@@ -72,24 +72,24 @@ class MoEGate(nn.Module):
         return topk_idx, topk_weight, aux_loss
 
 
-class AddAuxiliaryLoss(torch.autograd.Function):
-    """
-    The trick function of adding auxiliary (aux) loss,
-    which includes the gradient of the aux loss during backpropagation.
-    """
-    @staticmethod
-    def forward(ctx, x, loss):
-        assert loss.numel() == 1
-        ctx.dtype = loss.dtype
-        ctx.required_aux_loss = loss.requires_grad
-        return x
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_loss = None
-        if ctx.required_aux_loss:
-            grad_loss = torch.ones(1, dtype=ctx.dtype, device=grad_output.device)
-        return grad_output, grad_loss
+# class AddAuxiliaryLoss(torch.autograd.Function):
+#     """
+#     The trick function of adding auxiliary (aux) loss,
+#     which includes the gradient of the aux loss during backpropagation.
+#     """
+#     @staticmethod
+#     def forward(ctx, x, loss):
+#         assert loss.numel() == 1
+#         ctx.dtype = loss.dtype
+#         ctx.required_aux_loss = loss.requires_grad
+#         return x
+#
+#     @staticmethod
+#     def backward(ctx, grad_output):
+#         grad_loss = None
+#         if ctx.required_aux_loss:
+#             grad_loss = torch.ones(1, dtype=ctx.dtype, device=grad_output.device)
+#         return grad_output, grad_loss
 
 
 class MoE(nn.Module):
@@ -102,13 +102,13 @@ class MoE(nn.Module):
         self.config = config
         self.num_experts_per_tok = config.moe_config.num_experts_per_tok
         self.experts = nn.ModuleList([
-            layer(config, intermediate_size=config.moe_config.moe_intermediate_size) for _ in range(config.moe_config.n_routed_experts)
+            layer(config, intermediate_size=config.moe_intermediate_size) for _ in range(config.moe_config.n_routed_experts)
         ])
 
         self.gate = MoEGate(config)
 
         if config.moe_config.n_shared_experts is not None:
-            intermediate_size = config.moe_config.moe_intermediate_size * config.moe_config.n_shared_experts
+            intermediate_size = config.moe_intermediate_size * config.moe_config.n_shared_experts
             self.shared_experts = layer(config, intermediate_size=intermediate_size)
 
     def forward(self, hidden_states):
