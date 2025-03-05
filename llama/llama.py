@@ -16,7 +16,7 @@ from .sparse_moe import MoE
 class MLP(nn.Module):
     def __init__(self, config: Config, intermediate_size: Optional[int] = None):
         super().__init__()
-        config_intermediate_size = config.intermediate_size if intermediate_size is None else intermediate_size
+        config_intermediate_size = intermediate_size if intermediate_size else config.intermediate_size
 
         self.gate_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
         self.up_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
