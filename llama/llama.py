@@ -327,7 +327,6 @@ class LlamaModel(nn.Module):
                 aux loss when use MOE, else None
         """
         batch_size, seq_len = input_ids.shape
-
         if use_cache and past_key_values is None:
             past_key_values = KVCache()
 
@@ -366,7 +365,8 @@ class LlamaModel(nn.Module):
                 hidden_states=hidden_states,
                 position_embeddings=position_embeddings,
                 attention_mask=attention_mask,
-                past_key_values=past_key_values)
+                past_key_values=past_key_values
+            )
 
             if aux_loss:
                 aux_losses.append(aux_loss)
