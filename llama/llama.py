@@ -304,7 +304,8 @@ class LlamaModel(nn.Module):
             input_ids: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
-            use_cache: bool = False
+            use_cache: bool = False,
+            logits_to_keep: int = 0
     ) -> Dict[str, any]:
         """
         Args:
@@ -371,9 +372,12 @@ class LlamaModel(nn.Module):
             if aux_loss:
                 aux_losses.append(aux_loss)
 
+        #  (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
-        head = self.lm_head(hidden_states)
 
+        slice_indices = slice(-logits_to_keep, None)
+        #  (batch, seq_len, vocab_size)
+        head = self.lm_head(hidden_states[:, slice_indices, :])
         return {
             'logits': head,
             'past_key_values': past_key_values,
