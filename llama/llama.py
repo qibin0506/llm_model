@@ -98,8 +98,10 @@ class Attention(nn.Module):
         super().__init__()
         assert config.num_attention_heads % config.num_key_value_heads == 0
 
-        self.sdpa_attention = (config.attention_implementation == 'sdpa'
-                               and hasattr(torch.nn.functional, 'scaled_dot_product_attention'))
+        if config.attention_implementation == 'auto':
+            self.use_sdpa_attention = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        else:
+            self.use_sdpa_attention = config.attention_implementation == 'sdpa'
 
         self.layer_idx = layer_idx
         
@@ -187,7 +189,7 @@ class Attention(nn.Module):
                     batch, self.num_key_value_heads * self.num_key_value_groups, t.shape[-2], self.head_size),
                 (key_states, value_states))
 
-        if self.sdpa_attention:
+        if self.use_sdpa_attention:
             with self._sdpa_kernel():
                 dropout_p = self.dropout.p if self.training else 0.0
                 attn = F.scaled_dot_product_attention(
