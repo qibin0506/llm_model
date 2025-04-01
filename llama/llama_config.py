@@ -132,7 +132,8 @@ class Config:
                 dropout for attention
             rope_config (`RoPEConfig`)
                 RoPE configurations
-            attention_implementation (`str`, default is sdpa)
+            attention_implementation (`str`, default is auto)
+                if attention_implementation='auto' use F.scaled_dot_product_attention first
                 if attention_implementation='sdpa' will use F.scaled_dot_product_attention
                 if attention_implementation='default' will use pure implementation
         """
@@ -150,7 +151,7 @@ class Config:
             num_key_value_heads: int = 32,
             max_position_embeddings: int = 2048,
             attention_dropout: float = 0.1,
-            attention_implementation = 'sdpa',
+            attention_implementation = 'auto',
             rope_config: RoPEConfig = RoPEConfig(),
             moe_config: Optional[MoEConfig] = None
     ):
