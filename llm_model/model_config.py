@@ -104,7 +104,7 @@ class MoEConfig:
 
 class Config:
     """
-        llama config
+        llm model config
 
         Args:
             vocab_size (`int`, *optional*, default is 21128):

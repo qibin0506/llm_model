@@ -3,7 +3,7 @@ from typing import Callable
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .llama_config import Config
+from .model_config import Config
 
 
 # https://github.com/bwconrad/soft-moe

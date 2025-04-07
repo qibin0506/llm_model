@@ -5,7 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from .llama_config import Config
+from .model_config import Config
 from .rmsnorm import RMSNorm
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
 from .kv_cache import KVCache
@@ -274,7 +274,7 @@ class DecoderLayer(nn.Module):
         return hidden_states, aux_loss
 
 
-class LlamaModel(nn.Module):
+class LlmModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.rotary_emb = RotaryEmbedding(config=config)

@@ -1,7 +1,7 @@
 import math
 import torch
 from typing import Optional, Tuple
-from .llama_config import Config
+from .model_config import Config
 
 
 def _compute_default_rope_parameters(

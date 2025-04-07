@@ -3,7 +3,7 @@ from typing import Callable
 import torch
 from torch import nn
 import torch.nn.functional as F
-from .llama_config import Config
+from .model_config import Config
 
 # deepseek like MOE, from https://github.com/TechxGenus/Deepseek-Coder-MoE
 
