@@ -1,5 +1,5 @@
 # llm-model-pytorch
-A Llama-like LLM Model
+An Llama-like LLM Model
 
 ``` python
 import torch
