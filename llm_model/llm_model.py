@@ -307,7 +307,8 @@ class LlmModel(nn.Module):
             attention_mask: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
-            logits_to_keep: int = 0
+            logits_to_keep: int = 0,
+            **kwargs,
     ) -> Dict[str, any]:
         """
         Args:
@@ -320,6 +321,8 @@ class LlmModel(nn.Module):
                 inference key value cache, when use_cache == True, will return KVCache on first forward
             use_cache (`bool`, default is False)
                 use KVCache or not
+            logits_to_keep: (`int`, default is 0)
+                compute logits for the last `logits_to_keep` tokens
 
         Returns:
             logits
@@ -335,7 +338,11 @@ class LlmModel(nn.Module):
 
         # (batch, seq_len, hidden_size)
         # for inference with past_key_values inputs_embeds.shape is (1, 1, hidden_size)
-        inputs_embeds = self.embed_tokens(input_ids)
+        inputs_embeds = self.get_input_embeddings(
+            input_ids,
+            attention_mask,
+            **kwargs
+        )
 
         # seq_len
         past_seen_tokens = past_key_values.get_seq_len() if past_key_values is not None else 0
@@ -386,3 +393,10 @@ class LlmModel(nn.Module):
             'aux_loss': None if not aux_losses else sum(aux_losses)
         }
 
+    def get_input_embeddings(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: Optional[torch.Tensor] = None,
+            **kwargs,
+    ):
+        return self.embed_tokens(input_ids)

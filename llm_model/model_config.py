@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import List, Optional, Callable
+import torch
 
 
 class RoPEConfig:
@@ -168,3 +169,52 @@ class Config:
         self.attention_implementation = attention_implementation
         self.rope_config = rope_config
         self.moe_config = moe_config
+
+
+class VLMConfig(Config):
+    def __init__(
+            self,
+            *,
+            image_tok: int,
+            image_size: int,
+            patch_size: int,
+            tokens_per_image: int,
+            vision_hidden_size: int,
+            vision_tower: Callable[[torch.Tensor], torch.Tensor],
+            vocab_size: int = 21128,
+            hidden_size: int = 4096,
+            intermediate_size: int = 11008,
+            moe_intermediate_size: int = 1407,
+            moe_n_dense_layer=1,
+            num_hidden_layers: int = 32,
+            num_attention_heads: int = 32,
+            num_key_value_heads: int = 32,
+            max_position_embeddings: int = 2048,
+            attention_dropout: float = 0.1,
+            attention_implementation='auto',
+            rope_config: RoPEConfig = RoPEConfig(),
+            moe_config: Optional[MoEConfig] = None
+    ):
+        super().__init__(
+            vocab_size = vocab_size,
+            hidden_size = hidden_size,
+            intermediate_size = intermediate_size,
+            moe_intermediate_size = moe_intermediate_size,
+            moe_n_dense_layer = moe_n_dense_layer,
+            num_hidden_layers = num_hidden_layers,
+            num_attention_heads = num_attention_heads,
+            num_key_value_heads = num_key_value_heads,
+            max_position_embeddings = max_position_embeddings,
+            attention_dropout = attention_dropout,
+            attention_implementation = attention_implementation,
+            rope_config = rope_config,
+            moe_config = moe_config
+        )
+
+        self.image_tok = image_tok
+        self.image_size = image_size
+        self.patch_size = patch_size
+        self.tokens_per_image = tokens_per_image
+        self.vision_hidden_size = vision_hidden_size
+        self.vision_tower = vision_tower
+
