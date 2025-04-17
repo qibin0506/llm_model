@@ -79,7 +79,6 @@ class VlmModel(LlmModel):
         pixel_values: Optional[torch.Tensor] = kwargs.get('pixel_values', None)
 
         if pixel_values is not None:
-            pixel_values = pixel_values.to(device=input_ids.device)
             # (batch_size, tokens_per_side*tokens_per_side, hidden_size)
             image_features = self.get_image_features(pixel_values)
 
