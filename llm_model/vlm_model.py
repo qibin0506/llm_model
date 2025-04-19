@@ -15,7 +15,7 @@ class MultiModalProjector(nn.Module):
             torch.zeros(config.vision_hidden_size, config.hidden_size)
         )
 
-        self.vision_norm = RMSNorm(config.hidden_size)
+        self.vision_norm = RMSNorm(config.vision_hidden_size)
 
         self.patches_per_image = int(config.image_size // config.patch_size)
         self.tokens_per_side = int(config.tokens_per_image**0.5)
@@ -24,13 +24,13 @@ class MultiModalProjector(nn.Module):
 
     def forward(self, vision_outputs: torch.Tensor):
         # (batch_size, patches_per_image*patches_per_image, vision_hidden_size)
-        batch_size, _, seq_length = vision_outputs.shape
+        batch_size, _, vision_hidden_size = vision_outputs.shape
 
         # (batch_size, vision_hidden_size, patches_per_image*patches_per_image)
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
         # (batch_size, vision_hidden_size, patches_per_image, patches_per_image)
         reshaped_vision_outputs = reshaped_vision_outputs.reshape(
-            batch_size, seq_length, self.patches_per_image, self.patches_per_image
+            batch_size, vision_hidden_size, self.patches_per_image, self.patches_per_image
         )
         reshaped_vision_outputs = reshaped_vision_outputs.contiguous()
 
