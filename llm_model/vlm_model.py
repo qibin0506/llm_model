@@ -44,7 +44,10 @@ class MultiModalProjector(nn.Module):
         normed_vision_outputs = self.vision_norm(pooled_vision_outputs)
 
         # (batch_size, tokens_per_side*tokens_per_side, hidden_size)
-        projected_vision_outputs = torch.matmul(normed_vision_outputs, self.input_projection_weight)
+        projected_vision_outputs = torch.matmul(
+            normed_vision_outputs,
+            self.input_projection_weight.to(normed_vision_outputs.dtype)
+        )
         return projected_vision_outputs.type_as(vision_outputs)
 
 
