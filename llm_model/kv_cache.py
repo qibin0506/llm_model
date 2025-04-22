@@ -27,7 +27,7 @@ class KVCache:
             self.value_cache.append(value_states)
         elif len(self.key_cache[layer_idx]) == 0:
             self.key_cache[layer_idx] = key_states
-            self.value_cache[layer_idx] = key_states
+            self.value_cache[layer_idx] = value_states
         else:
             self.key_cache[layer_idx] = torch.cat((self.key_cache[layer_idx], key_states), dim=-2)
             self.value_cache[layer_idx] = torch.cat((self.value_cache[layer_idx], value_states), dim=-2)
