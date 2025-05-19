@@ -152,16 +152,16 @@ class Attention(nn.Module):
         # query_states (batch, seq_len, num_heads, head_size)
         # key_states (batch, seq_len, num_key_value_heads, head_size)
         # value_states (batch, seq_len, num_key_value_heads, head_size)
-        query_states, key_states, value_states = map(
-            lambda t: t.reshape(batch, seq_len, -1, self.head_size),
-            (query_states, key_states, value_states))
+        query_states = query_states.reshape(batch, seq_len, -1, self.head_size)
+        key_states = key_states.reshape(batch, seq_len, -1, self.head_size)
+        value_states = value_states.reshape(batch, seq_len, -1, self.head_size)
 
         # query_states (batch, num_heads, seq_len, head_size)
         # key_states (batch, num_key_value_heads, seq_len, head_size)
         # value_states (batch, num_key_value_heads, seq_len, head_size)
-        query_states, key_states, value_states = map(
-            lambda t: t.permute(0, 2, 1, 3),
-            (query_states, key_states, value_states))
+        query_states = query_states.permute(0, 2, 1, 3)
+        key_states = key_states.permute(0, 2, 1, 3)
+        value_states = value_states.permute(0, 2, 1, 3)
 
         cos, sin = position_embeddings
         # query_states (batch, num_heads, seq_len, head_size)
@@ -176,19 +176,23 @@ class Attention(nn.Module):
             pass
         else:
             # (batch, num_key_value_heads, 1, seq_len, head_size)
-            key_states, value_states = map(lambda t: t[:, :, None, :, :], (key_states, value_states))
+            key_states = key_states[:, :, None, :, :]
+            value_states = value_states[:, :, None, :, :]
             # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size)
-            key_states, value_states = map(
-                lambda t: t.expand(
-                    batch, self.num_key_value_heads, self.num_key_value_groups, t.shape[-2], self.head_size),
-                (key_states, value_states))
+            key_states = key_states.expand(
+                batch, self.num_key_value_heads, self.num_key_value_groups, key_states.shape[-2], self.head_size
+            )
+            value_states = key_states.expand(
+                batch, self.num_key_value_heads, self.num_key_value_groups, value_states.shape[-2], self.head_size
+            )
 
             # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
-            key_states, value_states = map(
-                lambda t: t.reshape(
-                    batch, self.num_key_value_heads * self.num_key_value_groups, t.shape[-2], self.head_size),
-                (key_states, value_states))
-
+            key_states = key_states.reshape(
+                batch, self.num_key_value_heads * self.num_key_value_groups, key_states.shape[-2], self.head_size
+            )
+            value_states = key_states.reshape(
+                batch, self.num_key_value_heads * self.num_key_value_groups, value_states.shape[-2], self.head_size
+            )
         if self.use_sdpa_attention:
             with self._sdpa_kernel():
                 dropout_p = self.dropout.p if self.training else 0.0
