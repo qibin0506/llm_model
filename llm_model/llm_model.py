@@ -182,7 +182,7 @@ class Attention(nn.Module):
             key_states = key_states.expand(
                 batch, self.num_key_value_heads, self.num_key_value_groups, key_states.shape[-2], self.head_size
             )
-            value_states = key_states.expand(
+            value_states = value_states.expand(
                 batch, self.num_key_value_heads, self.num_key_value_groups, value_states.shape[-2], self.head_size
             )
 
@@ -190,7 +190,7 @@ class Attention(nn.Module):
             key_states = key_states.reshape(
                 batch, self.num_key_value_heads * self.num_key_value_groups, key_states.shape[-2], self.head_size
             )
-            value_states = key_states.reshape(
+            value_states = value_states.reshape(
                 batch, self.num_key_value_heads * self.num_key_value_groups, value_states.shape[-2], self.head_size
             )
         if self.use_sdpa_attention:
