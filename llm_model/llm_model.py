@@ -242,7 +242,7 @@ class DecoderLayer(nn.Module):
                 and config.moe_config.num_experts_per_tok
                 and config.moe_config.n_routed_experts
                 and config.moe_config.n_shared_experts
-                and layer_idx < config.moe_n_dense_layer
+                and layer_idx >= config.moe_n_dense_layer
         )
 
         if use_moe:
