@@ -1,6 +1,12 @@
 # llm-model-pytorch
 An Llama-like LLM Model
 
+## install
+```python
+pip3 install project_llm_model
+```
+
+## usage
 ``` python
 import torch
 from llm_model import LlmModel
