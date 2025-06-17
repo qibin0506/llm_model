@@ -1,5 +1,5 @@
 # llm-model-pytorch
-An Llama-like LLM Model
+Implement llm model in pytorch, support MoE and RoPE
 
 ## install
 ```python
