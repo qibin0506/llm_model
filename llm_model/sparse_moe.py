@@ -111,6 +111,8 @@ class MoE(nn.Module):
             intermediate_size = config.moe_intermediate_size * config.moe_config.n_shared_experts
             self.shared_experts = layer(config, intermediate_size=intermediate_size)
 
+        self.support_scatter_reduce_ = True
+
     def forward(self, hidden_states):
         identity = hidden_states
         orig_shape = hidden_states.shape
@@ -151,7 +153,14 @@ class MoE(nn.Module):
             expert_out = expert(expert_tokens).to(expert_cache.dtype)
             expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
 
-            # NotImplementedError: The operator 'aten::scatter_reduce.two_out' is not currently implemented for the MPS device.
-            # expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce='sum')
-            expert_cache.scatter_add_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out)
+            # NotImplementedError: The operator 'aten::scatter_reduce.two_out' is not currently implemented for the MPS dev
+            if self.support_scatter_reduce_:
+                try:
+                    expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce='sum')
+                except:
+                    expert_cache.scatter_add_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out)
+                    self.support_scatter_reduce_ = False
+            else:
+                expert_cache.scatter_add_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out)
+
         return expert_cache
