@@ -35,7 +35,6 @@ class RotaryEmbedding(nn.Module):
     ):
         super().__init__()
 
-        # BC: "rope_type" was originally "type"
         if config is not None and config.rope_config.rope_type is not None:
             self.rope_type = config.rope_config.rope_type
         else:
@@ -62,7 +61,7 @@ class RotaryEmbedding(nn.Module):
             inv_freq, self.attention_scaling = self.rope_init_fn(
                 self.config, device, seq_len=seq_len
             )
-            self.register_buffer("inv_freq", inv_freq, persistent=False)  # TODO joao: may break with compilation
+            self.register_buffer("inv_freq", inv_freq, persistent=False)
             self.max_seq_len_cached = seq_len
 
         if seq_len < self.original_max_seq_len and self.max_seq_len_cached > self.original_max_seq_len:  # reset

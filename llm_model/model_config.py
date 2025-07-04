@@ -10,7 +10,7 @@ class RoPEConfig:
 
     Args:
         rope_type (`str`, default is default):
-            the rope type, support `default`, `linear`, `dynamic`, `yarn`, `longrope`, `llama3`
+            the rope type, support `default`, `dynamic`, `yarn`,
         rope_theta (`float`, default is 10000.0)
             the rope theta args
         factor (`float`):
@@ -18,7 +18,7 @@ class RoPEConfig:
             most scaling types, a `factor` of x will enable the model to handle sequences of length x *
             original maximum pre-trained length.
         attention_factor (`float`):
-            Used with 'yarn' and 'longrope'. The scaling factor to be applied on the attention
+            Used with 'yarn'. The scaling factor to be applied on the attention
             computation. If unspecified, it defaults to value recommended by the implementation, using the
             `factor` field to infer the suggested value.
         beta_fast (`float`):
@@ -27,29 +27,20 @@ class RoPEConfig:
         beta_slow (`float`):
             Only used with 'yarn'. Parameter to set the boundary for interpolation (only) in the linear
             ramp function. If unspecified, it defaults to 1.
-        long_factor (`List[float]`):
-            Only used with 'longrope'. The scaling factor to be applied to long contexts (<
-            `original_max_position_embeddings`). Must be a list of numbers with the same length as the hidden
-            size divided by the number of attention heads divided by 2
-        short_factor (`List[float]`):
-            Only used with 'longrope'. The scaling factor to be applied to short contexts (<
-            `original_max_position_embeddings`). Must be a list of numbers with the same length as the hidden
-            size divided by the number of attention heads divided by 2
-        low_freq_factor (`float`):
-            Only used with 'llama3'. Scaling factor applied to low frequency components of the RoPE
-        high_freq_factor (`float`):
-            Only used with 'llama3'. Scaling factor applied to high frequency components of the RoPE
+        mscale (`float`):
+            Only used with 'yarn'. Default is None.
+        mscale_all_dim (`float`):
+            Only used with 'yarn'. Default is None.
     """
     rope_type: str = 'default'
     rope_theta: float = 10000.0
     factor: float = 1.0
-    attention_factor: float = None
+    partial_rotary_factor: float = 1.0
     beta_fast: float = 32
     beta_slow: float = 1
-    long_factor: List[float] = None
-    short_factor: List[float] = None
-    low_freq_factor: float = None
-    high_freq_factor: float = None
+    mscale: Optional[float] = None
+    mscale_all_dim: Optional[float] = None
+    attention_factor: Optional[float] = None
 
 
 @dataclass(kw_only=True)
@@ -126,6 +117,7 @@ class Config:
     num_attention_heads: int
     num_key_value_heads: int
     max_position_embeddings: int
+    original_max_position_embeddings: Optional[int] = None
     attention_dropout: float = 0.1
     attention_implementation: str = 'auto'
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
