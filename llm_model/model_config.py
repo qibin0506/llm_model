@@ -1,5 +1,5 @@
 from typing import List, Optional, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import torch
 
 
@@ -128,8 +128,12 @@ class Config:
     max_position_embeddings: int
     attention_dropout: float = 0.1
     attention_implementation: str = 'auto'
-    rope_config: RoPEConfig = RoPEConfig()
+    rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
+
+    def __post_init__(self):
+        if self.num_key_value_heads is None:
+            self.num_key_value_heads = self.num_attention_heads
 
 
 @dataclass(kw_only=True)
