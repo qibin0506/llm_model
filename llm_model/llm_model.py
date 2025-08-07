@@ -308,6 +308,8 @@ class LlmModel(nn.Module):
             self,
             input_ids: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
+            doc_boundary_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
             logits_to_keep: int = 0,
@@ -320,6 +322,10 @@ class LlmModel(nn.Module):
             attention_mask (`torch.Tensor`, *optional*, default is None)
                 input mask for ignore padding, shape is (batch, seq_len),
                 eg [[true, true, true, false], [true, true, true, true]]
+            doc_boundary_mask
+                shape is (batch, 1, seq_len, seq_len)
+            position_ids
+                shape is (batch, seq_len)
             past_key_values (`KVCache`, *optional*, default is None):
                 inference key value cache, when use_cache == True, will return KVCache on first forward
             use_cache (`bool`, default is False)
@@ -351,8 +357,8 @@ class LlmModel(nn.Module):
         past_seen_tokens = past_key_values.get_seq_len() if past_key_values is not None else 0
         full_seq_len = past_seen_tokens + seq_len
 
-        position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
-        position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+        if position_ids is None:
+            position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
 
         if attention_mask is None:
             # (batch_size, past_seen_tokens+seq_len)
@@ -361,9 +367,12 @@ class LlmModel(nn.Module):
                 (batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device
             )
 
+        position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+
         # (batch_size, 1, seq_len, past_seen_tokens+seq_len)
         attention_mask = prepare_decoder_attention_mask(
             attention_mask=attention_mask,
+            doc_boundary_mask=doc_boundary_mask,
             input_shape=(batch_size, seq_len),
             past_key_values_length=past_seen_tokens,
             dtype=inputs_embeds.dtype,
