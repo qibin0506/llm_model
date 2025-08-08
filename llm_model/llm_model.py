@@ -169,16 +169,16 @@ class Attention(nn.Module):
         # (batch, seq_len, num_key_value_heads*head_size)
         value_states = self.v_proj(hidden_states)
 
-        if self.use_qk_norm:
-            query_states = self.q_norm(query_states)
-            key_states = self.k_norm(key_states)
-
         # query_states (batch, seq_len, num_heads, head_size)
         # key_states (batch, seq_len, num_key_value_heads, head_size)
         # value_states (batch, seq_len, num_key_value_heads, head_size)
         query_states = query_states.reshape(batch, seq_len, -1, self.head_size)
         key_states = key_states.reshape(batch, seq_len, -1, self.head_size)
         value_states = value_states.reshape(batch, seq_len, -1, self.head_size)
+
+        if self.use_qk_norm:
+            query_states = self.q_norm(query_states)
+            key_states = self.k_norm(key_states)
 
         # query_states (batch, num_heads, seq_len, head_size)
         # key_states (batch, num_key_value_heads, seq_len, head_size)
