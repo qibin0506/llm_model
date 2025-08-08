@@ -6,11 +6,27 @@ from torch import nn
 import torch.nn.functional as F
 
 from .model_config import Config
-from .rmsnorm import RMSNorm
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
+
+    def extra_repr(self):
+        return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
 class MLP(nn.Module):
@@ -102,6 +118,7 @@ class Attention(nn.Module):
         else:
             self.use_sdpa_attention = config.attention_implementation == 'sdpa'
 
+        self.use_qk_norm = config.use_qk_norm
         self.layer_idx = layer_idx
         
         self.hidden_size = config.hidden_size
@@ -116,6 +133,10 @@ class Attention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=False)
         self.dropout = nn.Dropout(p=config.attention_dropout)
+
+        if self.use_qk_norm:
+            self.q_norm = RMSNorm(self.head_dim)
+            self.k_norm = RMSNorm(self.head_dim)
 
     def _sdpa_kernel(self, enable_flash: bool=True, enable_math: bool=True, enable_mem_efficient: bool=True):
         if version.parse(torch.__version__).release < version.parse("2.3").release:
@@ -147,6 +168,10 @@ class Attention(nn.Module):
         key_states = self.k_proj(hidden_states)
         # (batch, seq_len, num_key_value_heads*head_size)
         value_states = self.v_proj(hidden_states)
+
+        if self.use_qk_norm:
+            query_states = self.q_norm(query_states)
+            key_states = self.k_norm(key_states)
 
         # query_states (batch, seq_len, num_heads, head_size)
         # key_states (batch, seq_len, num_key_value_heads, head_size)

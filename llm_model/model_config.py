@@ -101,12 +101,16 @@ class Config:
             max position embeddings
         attention_dropout (`float`, *optional*, default is 0.1)
             dropout for attention
-        rope_config (`RoPEConfig`)
-            RoPE configurations
         attention_implementation (`str`, default is auto)
             if attention_implementation='auto' use F.scaled_dot_product_attention first
             if attention_implementation='sdpa' will use F.scaled_dot_product_attention
             if attention_implementation='default' will use pure implementation
+        rope_config (`RoPEConfig`)
+            RoPE configurations
+        moe_config (`MoEConfig`)
+            MoE config
+        use_qk_norm (`bool`)
+            add qk norm
     """
     vocab_size: int
     hidden_size: int
@@ -122,6 +126,7 @@ class Config:
     attention_implementation: str = 'auto'
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
+    use_qk_norm: bool = True
 
     def __post_init__(self):
         if self.num_key_value_heads is None:
