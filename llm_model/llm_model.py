@@ -135,8 +135,8 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(p=config.attention_dropout)
 
         if self.use_qk_norm:
-            self.q_norm = RMSNorm(self.head_dim)
-            self.k_norm = RMSNorm(self.head_dim)
+            self.q_norm = RMSNorm(self.head_size)
+            self.k_norm = RMSNorm(self.head_size)
 
     def _sdpa_kernel(self, enable_flash: bool=True, enable_math: bool=True, enable_mem_efficient: bool=True):
         if version.parse(torch.__version__).release < version.parse("2.3").release:
