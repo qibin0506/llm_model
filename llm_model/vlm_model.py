@@ -2,9 +2,8 @@ from typing import Optional
 import torch
 from torch import nn
 
-from .llm_model import LlmModel
+from .llm_model import RMSNorm, LlmModel
 from .model_config import VLMConfig
-from .rmsnorm import RMSNorm
 
 
 class MultiModalProjector(nn.Module):
