@@ -56,8 +56,8 @@ print(vlm_model)
 | use_qk_norm | bool | 是否使用qk norm |
 
 
-## VLM Config
-VlmConfig inherits from LLMConfig
+## VLMConfig
+VlmConfig 继承自 LLMConfig
 |  field | 类型 | 解释 |
 |  ---- |  ----   | ---- |
 | image_tok | int | 指定图像的token id |
