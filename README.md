@@ -58,8 +58,8 @@ print(vlm_model)
 
 ## VLM Config
 VlmConfig inherits from LLMConfig
-|  field | type | explanation | 中文解释 | 
-|  ---- |  ----   | ----  | ---- |
+|  field | 类型 | 解释 |
+|  ---- |  ----   | ---- |
 | image_tok | int | 指定图像的token id |
 | image_size | int | 指定图像的大小 |
 | patch_size | int | 指定每个patch的大小 |
