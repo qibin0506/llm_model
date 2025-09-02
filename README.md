@@ -58,7 +58,7 @@ print(vlm_model)
 
 ## VLMConfig
 VlmConfig 继承自 LLMConfig
-|  field | 类型 | 解释 |
+|  字段 | 类型 | 解释 |
 |  ---- |  ----   | ---- |
 | image_tok | int | 指定图像的token id |
 | image_size | int | 指定图像的大小 |
