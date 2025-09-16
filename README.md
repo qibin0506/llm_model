@@ -44,8 +44,8 @@ print(vlm_model)
 | rope_config.mscale | float | 仅对YaRN生效 |
 | rope_config.mscale_all_dim | Option[float] | 仅对YaRN生效 |
 | rope_config.attention_factor | Option[Option] | 仅对YaRN生效 |
-| moe_config.intermediate_size | int | 使用MoE模型时指定专家MLP的intermediate size |
-| moe_config.n_dense_layer | int | 使用MoE模型时指定使用多少MLP层 |
+| moe_config.intermediate_size | Optional[int] | 使用MoE模型时指定专家MLP的intermediate size |
+| moe_config.n_dense_layer | Optional[int] | 使用MoE模型时指定使用多少MLP层 |
 | moe_config.num_experts_per_tok | Option[int] | MoE模型每个token选择的专家数 |
 | moe_config.n_shared_experts | Option[int] | MoE模型共享专家总数 |
 | moe_config.n_routed_experts | Option[int] | MoE模型被路由的专家总数 |
