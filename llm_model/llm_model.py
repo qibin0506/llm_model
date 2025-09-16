@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, Dict
 from packaging import version
 
 import torch
@@ -263,10 +263,11 @@ class DecoderLayer(nn.Module):
 
         use_moe = (
                 config.moe_config
+                and config.moe_config.intermediate_size
                 and config.moe_config.num_experts_per_tok
                 and config.moe_config.n_routed_experts
                 and config.moe_config.n_shared_experts
-                and layer_idx >= config.moe_n_dense_layer
+                and layer_idx >= config.moe_config.n_dense_layer
         )
 
         if use_moe:
@@ -395,7 +396,7 @@ class LlmModel(nn.Module):
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
         # (batch_size, 1, seq_len, past_seen_tokens+seq_len)
-        attention_mask = prepare_decoder_attention_mask(
+        causal_mask = prepare_decoder_attention_mask(
             attention_mask=attention_mask,
             doc_boundary_mask=doc_boundary_mask,
             input_shape=(batch_size, seq_len),
@@ -405,18 +406,18 @@ class LlmModel(nn.Module):
         )
 
         hidden_states = inputs_embeds
-        aux_losses: List[torch.Tensor] = []
+        aux_losses = ()
 
         for layer in self.layers:
             hidden_states, aux_loss = layer(
                 hidden_states=hidden_states,
                 position_embeddings=position_embeddings,
-                attention_mask=attention_mask,
+                attention_mask=causal_mask,
                 past_key_values=past_key_values
             )
 
-            if aux_loss:
-                aux_losses.append(aux_loss)
+            if aux_loss is not None:
+                aux_losses += (aux_loss,)
 
         #  (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
@@ -424,10 +425,11 @@ class LlmModel(nn.Module):
         slice_indices = slice(-logits_to_keep, None)
         #  (batch, seq_len, vocab_size)
         head = self.lm_head(hidden_states[:, slice_indices, :])
+
         return {
             'logits': head,
             'past_key_values': past_key_values,
-            'aux_loss': None if not aux_losses else sum(aux_losses)
+            'aux_loss':  None if len(aux_losses) == 0 else sum(aux_losses)
         }
 
     def get_input_embeddings(

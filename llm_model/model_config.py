@@ -48,26 +48,29 @@ class MoEConfig:
     """
     MoE Config
     Args:
+        intermediate_size (`int`, *optional*, defaults to None):
+            Dimension of the MoE representations.
+        n_dense_layer (`int`, default to None)
+            n layers use dense for moe
         num_experts_per_tok (`int`, *optional*, defaults to None):
             Number of selected experts, None means dense model.
-        n_routed_experts (`int`, *optional*, defaults to None):
-            Number of routed experts, None means dense model.
         n_shared_experts (`int`, *optional*, defaults to None):
             Number of shared experts, None means dense model.
-        scoring_func (`str`, *optional*, defaults to 'softmax'):
-            Method of computing expert weights.
-        aux_loss_alpha (`float`, *optional*, defaults to 0.001):
-            Auxiliary loss weight coefficient.
+        n_routed_experts (`int`, *optional*, defaults to None):
+            Number of routed experts, None means dense model.
+        routed_scaling_factor (`float`, *optional*, defaults to 1.0):
+            Scaling factor or routed experts.
         seq_aux = (`bool`, *optional*, defaults to True):
             Whether to compute the auxiliary loss for each individual sample.
         norm_topk_prob (`bool`, *optional*, defaults to False):
             Whether to normalize the weights of the routed experts.
     """
+    intermediate_size: Optional[int] = None
+    n_dense_layer: Optional[int] = None
     num_experts_per_tok: Optional[int] = None
-    n_routed_experts: Optional[int] = None
     n_shared_experts: Optional[int] = None
-    scoring_func: str = 'softmax'
-    aux_loss_alpha: float = 0.001
+    n_routed_experts: Optional[int] = None
+    routed_scaling_factor = 1.0
     seq_aux: bool = True
     norm_topk_prob: bool = False
 
@@ -84,10 +87,6 @@ class Config:
             the hidden size
         intermediate_size (`int`, *optional*, default is 11008):
             the intermediate_size
-        moe_intermediate_size (`int`, *optional*, defaults to 1407):
-            Dimension of the MoE representations.
-        moe_n_dense_layer (`int`, default is 1)
-            n layers use dense for moe
         num_hidden_layers (`int`, *optional*, default is 32)
             decoder layers count
         num_attention_heads (`int`, *optional*, default is 32):
@@ -115,8 +114,6 @@ class Config:
     vocab_size: int
     hidden_size: int
     intermediate_size: int
-    moe_intermediate_size: int
-    moe_n_dense_layer: int
     num_hidden_layers: int
     num_attention_heads: int
     num_key_value_heads: int
