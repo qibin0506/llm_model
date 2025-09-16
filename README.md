@@ -28,8 +28,6 @@ print(vlm_model)
 | vocab_size | int | 指定使用字典大小 |
 | hidden_size | int | 指定模型的hidden size |
 | intermediate_size | int | 指定模型中MLP的intermediate size |
-| moe_intermediate_size | int | 使用MoE模型时指定专家MLP的intermediate size |
-| moe_n_dense_layer | int | 使用MoE模型时指定使用多少MLP层 |
 | num_hidden_layers | int | 指定使用几个隐藏层 |
 | num_attention_heads | int | 指定attention的头的数量 |
 | num_key_value_heads | int | 指定attention的key和value头的数量 |
@@ -46,11 +44,11 @@ print(vlm_model)
 | rope_config.mscale | float | 仅对YaRN生效 |
 | rope_config.mscale_all_dim | Option[float] | 仅对YaRN生效 |
 | rope_config.attention_factor | Option[Option] | 仅对YaRN生效 |
+| moe_config.intermediate_size | int | 使用MoE模型时指定专家MLP的intermediate size |
+| moe_config.n_dense_layer | int | 使用MoE模型时指定使用多少MLP层 |
 | moe_config.num_experts_per_tok | Option[int] | MoE模型每个token选择的专家数 |
-| moe_config.n_routed_experts | Option[int] | MoE模型被路由的专家总数 |
 | moe_config.n_shared_experts | Option[int] | MoE模型共享专家总数 |
-| moe_config.scoring_func | str | 仅支持softmax |
-| moe_config.aux_loss_alpha | float | MoE辅助loss系数 |
+| moe_config.n_routed_experts | Option[int] | MoE模型被路由的专家总数 |
 | moe_config.seq_aux | bool | 是否计算每个单独样本的辅助损失 |
 | moe_config.norm_topk_prob | bool | 是否对路由专家的权重进行标准化 |
 | use_qk_norm | bool | 是否使用qk norm |
@@ -72,7 +70,7 @@ VlmConfig 继承自 LLMConfig
 ## Demo
 ``` python
 import torch
-from llm_model *
+from llm_model import *
 
 def get_model_config(long_context = False):
     # max_position_embeddings: 512 -> 2048
@@ -84,8 +82,6 @@ def get_model_config(long_context = False):
         vocab_size=TrainerTools().tokenizer.vocab_size,
         hidden_size=768,
         intermediate_size=2048,
-        moe_intermediate_size=1024,
-        moe_n_dense_layer=1,
         num_hidden_layers=24,
         num_attention_heads=12,
         num_key_value_heads=4,
@@ -97,10 +93,11 @@ def get_model_config(long_context = False):
             rope_theta=1e6
         ),
         moe_config=MoEConfig(
+            intermediate_size=1024,
+            n_dense_layer=1,
             num_experts_per_tok=2,
-            n_routed_experts=8,
             n_shared_experts=1,
-            aux_loss_alpha=0.1,
+            n_routed_experts=8,
             seq_aux=True,
             norm_topk_prob=True
         )
