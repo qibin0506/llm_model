@@ -306,6 +306,7 @@ class DecoderLayer(nn.Module):
 class LlmModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
+        self.config = config
         self.rotary_emb = RotaryEmbedding(config=config)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
@@ -329,7 +330,6 @@ class LlmModel(nn.Module):
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
 
-
     def forward(
             self,
             input_ids: torch.Tensor,
@@ -338,7 +338,6 @@ class LlmModel(nn.Module):
             position_ids: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
-            logits_to_keep: int = 0,
             **kwargs,
     ) -> Dict[str, any]:
         """
@@ -422,12 +421,12 @@ class LlmModel(nn.Module):
         #  (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
 
-        slice_indices = slice(-logits_to_keep, None)
         #  (batch, seq_len, vocab_size)
-        head = self.lm_head(hidden_states[:, slice_indices, :])
+        head = self.lm_head(hidden_states)
 
         return {
             'logits': head,
+            'hidden_states': hidden_states,
             'past_key_values': past_key_values,
             'aux_loss':  None if len(aux_losses) == 0 else sum(aux_losses)
         }
