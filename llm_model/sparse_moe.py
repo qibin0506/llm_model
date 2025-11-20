@@ -112,7 +112,8 @@ class MoE(nn.Module):
             )
             y = torch.empty_like(hidden_states)
             for i, expert in enumerate(self.experts):
-                y[flat_topk_idx == i] = expert(hidden_states[flat_topk_idx == i])
+                expert_output = expert(hidden_states[flat_topk_idx == i])
+                y[flat_topk_idx == i] = expert_output.to(y.dtype)
             y = (y.view(*topk_weight.shape, -1) * topk_weight.unsqueeze(-1)).sum(dim=1)
             y = y.to(hidden_states.dtype).view(*orig_shape)
         else:

@@ -39,7 +39,7 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(config_intermediate_size, config.hidden_size, bias=False)
         self.activation = nn.SiLU()
 
-    def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         return self.down_proj(self.activation(self.gate_proj(hidden_states)) * self.up_proj(hidden_states))
 
 
@@ -355,8 +355,6 @@ class LlmModel(nn.Module):
                 inference key value cache, when use_cache == True, will return KVCache on first forward
             use_cache (`bool`, default is False)
                 use KVCache or not
-            logits_to_keep: (`int`, default is 0)
-                compute logits for the last `logits_to_keep` tokens
 
         Returns:
             logits
@@ -372,11 +370,7 @@ class LlmModel(nn.Module):
 
         # (batch, seq_len, hidden_size)
         # for inference with past_key_values inputs_embeds.shape is (1, 1, hidden_size)
-        inputs_embeds = self.get_input_embeddings(
-            input_ids,
-            attention_mask,
-            **kwargs
-        )
+        inputs_embeds = self.get_input_embeddings(input_ids, attention_mask, **kwargs)
 
         # seq_len
         past_seen_tokens = past_key_values.get_seq_len() if past_key_values is not None else 0
