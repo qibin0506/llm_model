@@ -316,6 +316,9 @@ class LlmModel(nn.Module):
         self.head_norm = RMSNorm(config.hidden_size)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        if config.tie_word_embeddings:
+            self.lm_head.weight = self.embed_tokens.weight
+
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module):

@@ -110,6 +110,8 @@ class Config:
             MoE config
         use_qk_norm (`bool`)
             add qk norm
+        tie_word_embeddings (`bool`)
+            tie word embeddings
     """
     vocab_size: int
     hidden_size: int
@@ -121,9 +123,10 @@ class Config:
     original_max_position_embeddings: Optional[int] = None
     attention_dropout: float = 0.1
     attention_implementation: str = 'auto'
+    use_qk_norm: bool = True
+    tie_word_embeddings: bool = False
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
-    use_qk_norm: bool = True
 
     def __post_init__(self):
         if self.num_key_value_heads is None:
