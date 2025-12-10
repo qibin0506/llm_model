@@ -3,6 +3,7 @@ from typing import Callable
 import torch
 from torch import nn
 import torch.nn.functional as F
+import torch.nn.init as init
 from .model_config import Config
 
 
@@ -24,7 +25,6 @@ class MoEGate(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        import torch.nn.init as init
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states):

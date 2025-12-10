@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, Dict
 from packaging import version
+import inspect
 
 import torch
 from torch import nn
@@ -11,9 +12,15 @@ from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
 
+try:
+    _sdpa_params = inspect.signature(F.scaled_dot_product_attention).parameters
+    _SDPA_SUPPORT_GQA = 'enable_gqa' in _sdpa_params
+except ValueError:
+    _SDPA_SUPPORT_GQA = False
+
 
 class RMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
+    def __init__(self, hidden_size, eps = 1e-6):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -44,11 +51,7 @@ class MLP(nn.Module):
 
 
 class RotaryEmbedding(nn.Module):
-    def __init__(
-        self,
-        config: Optional[Config] = None,
-        device=None,
-    ):
+    def __init__(self, config: Optional[Config] = None, device = None):
         super().__init__()
 
         if config is not None and config.rope_config.rope_type is not None:
@@ -109,18 +112,14 @@ class RotaryEmbedding(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, config: Config, layer_idx: int):
+    def __init__(self, config: Config, layer_idx: int, use_sdpa_attention: bool):
         super().__init__()
         assert config.num_attention_heads % config.num_key_value_heads == 0
 
-        if config.attention_implementation == 'auto':
-            self.use_sdpa_attention = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        else:
-            self.use_sdpa_attention = config.attention_implementation == 'sdpa'
-
+        self.use_sdpa_attention = use_sdpa_attention
         self.use_qk_norm = config.use_qk_norm
         self.layer_idx = layer_idx
-        
+
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_size = self.hidden_size // self.num_heads
@@ -138,7 +137,7 @@ class Attention(nn.Module):
             self.q_norm = RMSNorm(self.head_size)
             self.k_norm = RMSNorm(self.head_size)
 
-    def _sdpa_kernel(self, enable_flash: bool=True, enable_math: bool=True, enable_mem_efficient: bool=True):
+    def _sdpa_kernel(self, enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
         if version.parse(torch.__version__).release < version.parse("2.3").release:
             return torch.backends.cuda.sdp_kernel(
                 enable_flash=enable_flash, enable_math=enable_math, enable_mem_efficient=enable_mem_efficient
@@ -195,40 +194,51 @@ class Attention(nn.Module):
         if past_key_values is not None:
             key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
 
-        if self.num_key_value_heads == 1:
-            # key_states value_states (batch, 1, seq_len, head_size)
-            pass
-        else:
-            # (batch, num_key_value_heads, 1, seq_len, head_size)
-            key_states = key_states[:, :, None, :, :]
-            value_states = value_states[:, :, None, :, :]
-            # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size)
-            key_states = key_states.expand(
-                batch, self.num_key_value_heads, self.num_key_value_groups, key_states.shape[-2], self.head_size
-            )
-            value_states = value_states.expand(
-                batch, self.num_key_value_heads, self.num_key_value_groups, value_states.shape[-2], self.head_size
-            )
-
-            # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
-            key_states = key_states.reshape(
-                batch, self.num_key_value_heads * self.num_key_value_groups, key_states.shape[-2], self.head_size
-            )
-            value_states = value_states.reshape(
-                batch, self.num_key_value_heads * self.num_key_value_groups, value_states.shape[-2], self.head_size
-            )
+        is_gqa = self.num_key_value_groups > 1
         if self.use_sdpa_attention:
             with self._sdpa_kernel():
                 dropout_p = self.dropout.p if self.training else 0.0
-                attn = F.scaled_dot_product_attention(
-                    query=query_states,
-                    key=key_states,
-                    value=value_states,
-                    dropout_p=dropout_p,
-                    attn_mask=attention_mask
-                )
+                is_causal = attention_mask is None and seq_len > 1
+
+                if is_gqa and _SDPA_SUPPORT_GQA:
+                    attn = F.scaled_dot_product_attention(
+                        query=query_states,
+                        key=key_states,
+                        value=value_states,
+                        dropout_p=dropout_p,
+                        attn_mask=attention_mask,
+                        is_causal=is_causal,
+                        enable_gqa=True
+                    )
+                else:
+                    if is_gqa:
+                        # (batch, num_key_value_heads, seq_len, head_size) ->
+                        # (batch, num_key_value_heads, 1, seq_len, head_size) ->
+                        # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size) ->
+                        # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
+                        key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
+                        value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+
+                    attn = F.scaled_dot_product_attention(
+                        query=query_states,
+                        key=key_states,
+                        value=value_states,
+                        dropout_p=dropout_p,
+                        attn_mask=attention_mask,
+                        is_causal=is_causal
+                    )
+
+            # (batch, num_heads, seq_len, head_size) -> (batch, seq_len, num_heads, head_size)
             attn = attn.transpose(1, 2)
         else:
+            if is_gqa:
+                # (batch, num_key_value_heads, seq_len, head_size) ->
+                # (batch, num_key_value_heads, 1, seq_len, head_size) ->
+                # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size) ->
+                # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
+                key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
+                value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+
             # (batch, num_heads, q_seq_len, k_seq_len)
             attn_scores = (self.scale * query_states) @ key_states.transpose(-1, -2)
             if attention_mask is not None:
@@ -245,19 +255,17 @@ class Attention(nn.Module):
 
         # (batch, seq_len, num_heads*head_size)
         attn = attn.reshape(batch, seq_len, -1)
-
         # (batch, seq_len, hidden_size)
         out = self.o_proj(attn)
-
         return out
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, config: Config, layer_idx: int):
+    def __init__(self, config: Config, layer_idx: int, use_sdpa_attention: bool):
         super().__init__()
 
         self.attn_norm = RMSNorm(config.hidden_size)
-        self.attn = Attention(config, layer_idx)
+        self.attn = Attention(config, layer_idx, use_sdpa_attention)
 
         self.mlp_norm = RMSNorm(config.hidden_size)
 
@@ -284,10 +292,10 @@ class DecoderLayer(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         residual = hidden_states
         hidden_states = self.attn(
-                      hidden_states=self.attn_norm(hidden_states),
-                      position_embeddings=position_embeddings,
-                      attention_mask=attention_mask,
-                      past_key_values=past_key_values
+            hidden_states=self.attn_norm(hidden_states),
+            position_embeddings=position_embeddings,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values
         )
 
         hidden_states = hidden_states + residual
@@ -307,11 +315,17 @@ class LlmModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
+
+        if config.attention_implementation == 'auto':
+            self.use_sdpa_attention = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        else:
+            self.use_sdpa_attention = config.attention_implementation == 'sdpa'
+
         self.rotary_emb = RotaryEmbedding(config=config)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         self.layers = nn.ModuleList(
-            [DecoderLayer(config, idx) for idx in range(config.num_hidden_layers)])
+            [DecoderLayer(config, idx, self.use_sdpa_attention) for idx in range(config.num_hidden_layers)])
 
         self.head_norm = RMSNorm(config.hidden_size)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -337,7 +351,6 @@ class LlmModel(nn.Module):
             self,
             input_ids: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
-            doc_boundary_mask: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
@@ -350,8 +363,6 @@ class LlmModel(nn.Module):
             attention_mask (`torch.Tensor`, *optional*, default is None)
                 input mask for ignore padding, shape is (batch, seq_len),
                 eg [[true, true, true, false], [true, true, true, true]]
-            doc_boundary_mask
-                shape is (batch, 1, seq_len, seq_len)
             position_ids
                 shape is (batch, seq_len)
             past_key_values (`KVCache`, *optional*, default is None):
@@ -391,15 +402,22 @@ class LlmModel(nn.Module):
 
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
-        # (batch_size, 1, seq_len, past_seen_tokens+seq_len)
-        causal_mask = prepare_decoder_attention_mask(
-            attention_mask=attention_mask,
-            doc_boundary_mask=doc_boundary_mask,
-            input_shape=(batch_size, seq_len),
-            past_key_values_length=past_seen_tokens,
-            dtype=inputs_embeds.dtype,
-            device=inputs_embeds.device
-        )
+        can_use_flash_causal = False
+        if self.use_sdpa_attention and seq_len > 1:
+            if attention_mask.all():
+                can_use_flash_causal = True
+
+        if can_use_flash_causal:
+            causal_mask = None
+        else:
+            # (bsz, 1, seq_len, full_seq_len)
+            causal_mask = prepare_decoder_attention_mask(
+                attention_mask=attention_mask,
+                input_shape=(batch_size, seq_len),
+                past_key_values_length=past_seen_tokens,
+                dtype=inputs_embeds.dtype,
+                device=inputs_embeds.device
+            )
 
         hidden_states = inputs_embeds
         aux_losses = ()
@@ -415,17 +433,17 @@ class LlmModel(nn.Module):
             if aux_loss is not None:
                 aux_losses += (aux_loss,)
 
-        #  (batch, seq_len, hidden_size)
+        # (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
 
-        #  (batch, seq_len, vocab_size)
+        # (batch, seq_len, vocab_size)
         head = self.lm_head(hidden_states)
 
         return {
             'logits': head,
             'hidden_states': hidden_states,
             'past_key_values': past_key_values,
-            'aux_loss':  None if len(aux_losses) == 0 else sum(aux_losses)
+            'aux_loss': None if len(aux_losses) == 0 else sum(aux_losses)
         }
 
     def get_input_embeddings(

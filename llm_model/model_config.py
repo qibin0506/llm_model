@@ -70,7 +70,7 @@ class MoEConfig:
     num_experts_per_tok: Optional[int] = None
     n_shared_experts: Optional[int] = None
     n_routed_experts: Optional[int] = None
-    routed_scaling_factor = 1.0
+    routed_scaling_factor: float = 1.0
     seq_aux: bool = True
     norm_topk_prob: bool = False
 

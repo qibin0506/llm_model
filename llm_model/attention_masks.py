@@ -82,7 +82,6 @@ def _make_causal_mask(
 
 def prepare_decoder_attention_mask(
         attention_mask,
-        doc_boundary_mask,
         input_shape,
         past_key_values_length,
         dtype,
@@ -128,11 +127,6 @@ def prepare_decoder_attention_mask(
         #           [     0.,      0.,      0., -65504.]]]], dtype=torch.float16)
         combined_attention_mask = (
             expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
-        )
-
-    if doc_boundary_mask is not None:
-        combined_attention_mask = (
-            doc_boundary_mask if combined_attention_mask is None else doc_boundary_mask + combined_attention_mask
         )
 
     return combined_attention_mask
