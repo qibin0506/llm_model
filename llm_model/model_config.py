@@ -60,10 +60,12 @@ class MoEConfig:
             Number of routed experts, None means dense model.
         routed_scaling_factor (`float`, *optional*, defaults to 1.0):
             Scaling factor or routed experts.
-        seq_aux = (`bool`, *optional*, defaults to True):
+        seq_aux (`bool`, *optional*, defaults to True):
             Whether to compute the auxiliary loss for each individual sample.
         norm_topk_prob (`bool`, *optional*, defaults to False):
             Whether to normalize the weights of the routed experts.
+        z_loss_coef (`float`)
+            moe z-loss coef
     """
     intermediate_size: Optional[int] = None
     n_dense_layer: Optional[int] = None
@@ -73,6 +75,7 @@ class MoEConfig:
     routed_scaling_factor: float = 1.0
     seq_aux: bool = True
     norm_topk_prob: bool = False
+    z_loss_coef: float = 1e-4
 
 
 @dataclass(kw_only=True)

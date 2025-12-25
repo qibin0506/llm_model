@@ -50,6 +50,9 @@ class MoEGate(nn.Module):
 
         ### expert-level computation auxiliary loss
         if self.training:
+            # z_loss: log(sum(exp(x)))^2
+            z_loss = torch.logsumexp(logits, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
+
             scores_for_aux = scores
             aux_topk = self.top_k
             # always compute aux loss based on the naive greedy topk method
@@ -73,6 +76,8 @@ class MoEGate(nn.Module):
                 Pi = scores_for_aux.mean(0)
                 fi = ce * self.n_routed_experts
                 aux_loss = (Pi * fi).sum()
+
+            aux_loss += z_loss
         else:
             aux_loss = None
 
