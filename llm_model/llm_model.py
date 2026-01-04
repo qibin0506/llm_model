@@ -403,8 +403,8 @@ class LlmModel(nn.Module):
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
         can_use_flash_causal = False
-        if self.use_sdpa_attention and seq_len > 1:
-            if attention_mask.all():
+        if self.use_sdpa_attention and seq_len > 1 and past_seen_tokens == 0:
+            if attention_mask.dim() == 2 and attention_mask.all():
                 can_use_flash_causal = True
 
         if can_use_flash_causal:
