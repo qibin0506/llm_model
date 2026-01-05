@@ -6,6 +6,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+try:
+    import deepspeed
+except: ...
+
 from .model_config import Config
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
 from .kv_cache import KVCache
@@ -315,6 +319,7 @@ class LlmModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
+        self.gradient_checkpointing = False
 
         if config.attention_implementation == 'auto':
             self.use_sdpa_attention = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
@@ -346,6 +351,22 @@ class LlmModel(nn.Module):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
+
+    def gradient_checkpointing_enable(self):
+        self.gradient_checkpointing = True
+
+    def _create_custom_forward(self, module):
+        def custom_forward(*inputs):
+            # inputs: hidden_states, attention_mask, cos, sin
+            h, m, c, s = inputs
+            return module(
+                hidden_states=h,
+                position_embeddings=(c, s),
+                attention_mask=m,
+                past_key_values=None
+            )
+
+        return custom_forward
 
     def forward(
             self,
@@ -379,6 +400,10 @@ class LlmModel(nn.Module):
                 aux loss when use MOE, else None
         """
         batch_size, seq_len = input_ids.shape
+
+        if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+            use_cache = False
+
         if use_cache and past_key_values is None:
             past_key_values = KVCache()
 
@@ -423,12 +448,23 @@ class LlmModel(nn.Module):
         aux_losses = ()
 
         for layer in self.layers:
-            hidden_states, aux_loss = layer(
-                hidden_states=hidden_states,
-                position_embeddings=position_embeddings,
-                attention_mask=causal_mask,
-                past_key_values=past_key_values
-            )
+            if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+                cos, sin = position_embeddings
+                layer_outputs = deepspeed.checkpointing.checkpoint(
+                    self._create_custom_forward(layer),
+                    hidden_states,
+                    causal_mask,
+                    cos,
+                    sin
+                )
+                hidden_states, aux_loss = layer_outputs
+            else:
+                hidden_states, aux_loss = layer(
+                    hidden_states=hidden_states,
+                    position_embeddings=position_embeddings,
+                    attention_mask=causal_mask,
+                    past_key_values=past_key_values
+                )
 
             if aux_loss is not None:
                 aux_losses += (aux_loss,)
