@@ -1,132 +1,168 @@
-# llm-model-pytorch
-Implement LLM and VLM model in pytorch, support MoE and RoPE
+# LLM Model PyTorch
 
-## 安装
-```python
+这是一个灵活且高效的 PyTorch 实现的大语言模型（LLM）和视觉语言模型（VLM）库。该项目旨在提供一个简洁的代码库，用于训练和推理现代 Transformer 模型，支持 **Mixture of Experts (MoE)**、**RoPE (YaRN/Dynamic)** 以及 **GQA/MQA** 等前沿技术。
+
+## ✨ 核心特性 (Key Features)
+
+基于源代码分析，本项目包含以下核心功能：
+
+*   **先进的注意力机制**:
+
+    *   支持 **GQA (Grouped Query Attention)** 和 **MQA (Multi-Query Attention)**，由 `num_key_value_heads` 参数控制。
+    *   原生支持 PyTorch 的 `F.scaled_dot_product_attention` (Flash Attention) 以加速计算。
+*   **位置编码 (Positional Embeddings)**:
+
+    *   实现 **Rotary Position Embeddings (RoPE)**。
+    *   支持 **YaRN (Yet another RoPE extension)** 用于长上下文外推。
+    *   支持 **Dynamic NTK** 缩放。
+*   **混合专家模型 (MoE)**:
+
+    *   支持 **Sparse MoE** 架构。
+    *   支持 **Shared Experts**（共享专家）与 Routed Experts（路由专家）结合的机制。
+    *   包含负载均衡辅助损失 (Auxiliary Loss) 和 Z-Loss。
+*   **多模态能力 (VLM)**:
+
+    *   提供 `VlmModel`，支持自定义视觉塔 (Vision Tower)。
+    *   实现多模态投影层 (Multi-Modal Projector)，支持 Patch Pooling。
+*   **推理优化**:
+
+    *   完整的 **KV Cache** 实现，支持高效的自回归解码。
+    *   支持梯度检查点 (Gradient Checkpointing) 以节省训练显存。
+ 
+*   **配套训练和推理框架**:
+    *   [https://github.com/qibin0506/llm_trainer](https://github.com/qibin0506/llm_trainer)
+
+## 🛠️ 安装 (Installation)
+
+你可以通过 pip 直接安装：
+
+``` Bash
 pip3 install project_llm_model
+
 ```
 
-## 快速开始
-``` python
-from llm_model import *
-def get_model_config():
-    return ModelConfig(...)
+或者从源码安装：
 
-def get_vlm_config():
-    return VLMConfig(...)
+``` Bash
+git clone https://github.com/qibin0506/llm_model.git
+cd llm_model
+python3 setup.py install
 
-model = LlmModel(get_model_config())
-vlm_model = VlmModel(get_vlm_config())
-
-print(model)
-print(vlm_model)
 ```
 
-## LLM ModelConfig 配置说明
-|  字段 | 类型 | 解释 |
-|  ---- |  ----   | ----  |
-| vocab_size | int | 指定使用字典大小 |
-| hidden_size | int | 指定模型的hidden size |
-| intermediate_size | int | 指定模型中MLP的intermediate size |
-| num_hidden_layers | int | 指定使用几个隐藏层 |
-| num_attention_heads | int | 指定attention的头的数量 |
-| num_key_value_heads | int | 指定attention的key和value头的数量 |
-| max_position_embeddings | int | 配置位置编码的max_position_embeddings |
-| original_max_position_embeddings | int | 当使用YaRN时，配置原始的max_position_embeddings |
-| attention_dropout | float | attention的Dropout rate |
-| attention_implementation | str | attention实现方式，取值：auto\sdpa\default |
-| rope_config.rope_type | str | RoPE类型，取值：default\yarn\dynamic |
-| rope_config.rope_theta | float | 对所有RoPE生效 |
-| rope_config.factor | float | 对除default外所有RoPE生效 |
-| rope_config.partial_rotary_factor | 对所有RoPE生效 |
-| rope_config.beta_fast | float | 仅对YaRN生效 |
-| rope_config.beta_slow | float | 仅对YaRN生效 |
-| rope_config.mscale | float | 仅对YaRN生效 |
-| rope_config.mscale_all_dim | Option[float] | 仅对YaRN生效 |
-| rope_config.attention_factor | Option[Option] | 仅对YaRN生效 |
-| moe_config.intermediate_size | Optional[int] | 使用MoE模型时指定专家MLP的intermediate size |
-| moe_config.n_dense_layer | Optional[int] | 使用MoE模型时指定使用多少MLP层 |
-| moe_config.num_experts_per_tok | Option[int] | MoE模型每个token选择的专家数 |
-| moe_config.n_shared_experts | Option[int] | MoE模型共享专家总数 |
-| moe_config.n_routed_experts | Option[int] | MoE模型被路由的专家总数 |
-| moe_config.seq_aux | bool | 是否计算每个单独样本的辅助损失 |
-| moe_config.norm_topk_prob | bool | 是否对路由专家的权重进行标准化 |
-| use_qk_norm | bool | 是否使用qk norm |
+## 🚀 快速开始 (Quick Start)
 
+### 1. 初始化 LLM 模型
 
-## VLMConfig
-VlmConfig 继承自 LLMConfig
-|  字段 | 类型 | 解释 |
-|  ---- |  ----   | ---- |
-| image_tok | int | 指定图像的token id |
-| image_size | int | 指定图像的大小 |
-| patch_size | int | 指定每个patch的大小 |
-| tokens_per_image | int | 指定每个图片占用token个数 |
-| vision_hidden_size | int | 指定vision projector的hidden size |
-| vision_tower | Callable[[torch.Tensor], torch.Tensor] | 用于指定视觉模型的输出 |
-
-
-
-## Demo
-``` python
+``` Python
 import torch
-from llm_model import *
+from llm_model import LlmModel, ModelConfig, RoPEConfig
 
-def get_model_config(long_context = False):
-    # max_position_embeddings: 512 -> 2048
-    max_position_embeddings = 2048 if long_context else 512
-    original_max_position_embeddings = 512 if long_context else None
-    rope_type = 'yarn' if long_context else 'default'
-
-    return ModelConfig(
-        vocab_size=TrainerTools().tokenizer.vocab_size,
-        hidden_size=768,
-        intermediate_size=2048,
-        num_hidden_layers=24,
-        num_attention_heads=12,
-        num_key_value_heads=4,
-        max_position_embeddings=max_position_embeddings,
-        original_max_position_embeddings=original_max_position_embeddings,
-        attention_implementation='auto',
-        rope_config=RoPEConfig(
-            rope_type=rope_type,
-            rope_theta=1e6
-        ),
-        moe_config=MoEConfig(
-            intermediate_size=1024,
-            n_dense_layer=1,
-            num_experts_per_tok=2,
-            n_shared_experts=1,
-            n_routed_experts=8,
-            seq_aux=True,
-            norm_topk_prob=True
-        )
+# 配置一个简单的 LLM
+config = ModelConfig(
+    vocab_size=32000,
+    hidden_size=4096,
+    intermediate_size=11008,
+    num_hidden_layers=32,
+    num_attention_heads=32,
+    num_key_value_heads=8,  # 使用 GQA (32/8 = 4 groups)
+    max_position_embeddings=4096,
+    rope_config=RoPEConfig(
+        rope_type='yarn',   # 使用 YaRN 支持长文本
+        rope_theta=10000.0,
+        factor=8.0          # 扩展系数
     )
+)
 
+model = LlmModel(config)
+print(model)
 
-def test_model(test_train=True):
-    model: LlmModel = LlmModel(config=get_model_config(vocab_size=1000))
-    pad_token_id = 0
+# 前向传播示例
+input_ids = torch.randint(0, 32000, (1, 128))
+output = model(input_ids)
+print(f"Logits shape: {output['logits'].shape}")
 
-    if test_train:
-        input_ids = torch.tensor([[1, 2, 3], [2, pad_token_id, pad_token_id]], dtype=torch.long)
-        # [[true, true, true], [true, false, false]]
-        attention_mask = input_ids != pad_token_id
-        logits, _ = model(input_ids, attention_mask=attention_mask)
-    else:
-        input_ids = torch.ones((1, 3), dtype=torch.long)
-        kv_cache: KVCache = None
-        model.eval()
-        with torch.no_grad():
-            for _ in range(10):
-                logits, kv_cache = model(input_ids, past_key_values=kv_cache, use_cache=True)
-                logits = logits[:, -1, :]
-                out_token = logits.argmax(dim=-1, keepdim=True)
-                print(out_token)
+```
 
-                input_ids = out_token
+### 2. 初始化 VLM 模型
 
+``` Python
+from llm_model import VlmModel, VLMConfig
 
-if __name__ == '__main__':
-    test_model(test_train=True)
+def dummy_vision_tower(images):
+    # 模拟视觉编码器输出: (batch, num_patches, vision_hidden)
+    return torch.randn(images.shape[0], 256, 1024)
+
+vlm_config = VLMConfig(
+    vocab_size=32000,
+    hidden_size=4096,
+    intermediate_size=11008,
+    num_hidden_layers=32,
+    num_attention_heads=32,
+    num_key_value_heads=32,
+    max_position_embeddings=2048,
+    # 视觉部分配置
+    image_tok=32001,        # 特殊 Image Token ID
+    image_size=336,
+    patch_size=14,
+    tokens_per_image=576,   # 投影后的 token 数量
+    vision_hidden_size=1024,
+    vision_tower=dummy_vision_tower
+)
+
+vlm_model = VlmModel(vlm_config)
+
+```
+
+## ⚙️ 配置说明 (Configuration)
+
+### ModelConfig (LLM)
+
+| **参数**                     | **类型** | **说明**                                          |
+| :------------------------- | :----- | :---------------------------------------------- |
+| `vocab_size`               | int    | 词表大小                                            |
+| `hidden_size`              | int    | 隐藏层维度                                           |
+| `intermediate_size`        | int    | MLP 中间层维度                                       |
+| `num_hidden_layers`        | int    | Transformer 层数                                  |
+| `num_attention_heads`      | int    | 注意力头数 (Query)                                   |
+| `num_key_value_heads`      | int    | KV 头数 (用于 GQA/MQA)                              |
+| `max_position_embeddings`  | int    | 最大序列长度                                          |
+| `attention_implementation` | str    | Attention 实现: `auto`, `sdpa` (Flash), `default` |
+| `use_qk_norm`              | bool   | 是否对 Q/K 进行 LayerNorm (推荐 True 以稳定训练)            |
+
+### RoPEConfig (位置编码)
+
+| **参数**                    | **类型** | **默认值**   | **说明**                                 |
+| :------------------------ | :----- | :-------- | :------------------------------------- |
+| `rope_type`               | str    | `default` | 可选: `default`, `dynamic` (NTK), `yarn` |
+| `rope_theta`              | float  | 10000.0   | RoPE 的基频                               |
+| `factor`                  | float  | 1.0       | 缩放系数 (用于外推)                            |
+| `beta_fast` / `beta_slow` | float  | -         | YaRN 算法专用的插值参数                         |
+
+### MoEConfig (混合专家)
+
+当配置了 `moe_config` 时，模型会将 MLP 层替换为 MoE 层（在 `n_dense_layer` 层之后）。
+
+| **参数**                | **类型** | **说明**                   |
+| :-------------------- | :----- | :----------------------- |
+| `num_experts_per_tok` | int    | 每个 Token 激活的专家数量 (Top-K) |
+| `n_routed_experts`    | int    | 路由专家总数                   |
+| `n_shared_experts`    | int    | 共享专家数量 (总是激活)            |
+| `intermediate_size`   | int    | 单个专家的维度                  |
+| `seq_aux`             | bool   | 是否计算序列级辅助损失              |
+
+## 📂 项目结构
+
+Plaintext
+
+```
+llm_model/
+├── llm_model.py       # 核心模型实现 (LlmModel, DecoderLayer, Attention)
+├── vlm_model.py       # 视觉语言模型扩展 (VlmModel)
+├── sparse_moe.py      # MoE 路由与专家实现
+├── rope.py            # 旋转位置编码 (RoPE, YaRN, Dynamic)
+├── kv_cache.py        # 推理 KV 缓存管理
+├── attention_masks.py # 因果与 Padding Mask 处理
+└── model_config.py    # 配置类定义
+
 ```
