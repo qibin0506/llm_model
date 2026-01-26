@@ -341,9 +341,9 @@ class LlmModel(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module):
-        std = 0.02
+        std = self.config.initializer_range
+
         if isinstance(module, nn.Linear):
-            # torch.nn.init.normal_(module.weight, mean=0.0, std=std)
             module.weight.data.normal_(mean=0.0, std=std)
             if module.bias is not None:
                 module.bias.data.zero_()
@@ -351,6 +351,9 @@ class LlmModel(nn.Module):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.MultiheadAttention):
+            # This uses torch's original init
+            module._reset_parameters()
 
     def gradient_checkpointing_enable(self):
         self.gradient_checkpointing = True
