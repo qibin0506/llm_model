@@ -107,6 +107,8 @@ class Config:
             if attention_implementation='auto' use F.scaled_dot_product_attention first
             if attention_implementation='sdpa' will use F.scaled_dot_product_attention
             if attention_implementation='default' will use pure implementation
+        initializer_range (`float`, default is 0.02)
+            initializer range for init model weights
         rope_config (`RoPEConfig`)
             RoPE configurations
         moe_config (`MoEConfig`)
@@ -126,6 +128,7 @@ class Config:
     original_max_position_embeddings: Optional[int] = None
     attention_dropout: float = 0.1
     attention_implementation: str = 'auto'
+    initializer_range: float = 0.02
     use_qk_norm: bool = True
     tie_word_embeddings: bool = False
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
