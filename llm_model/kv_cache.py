@@ -42,8 +42,8 @@ class KVCache:
                 # 申请最大显存
                 cache_shape = (batch_size, num_heads, self.max_capacity, head_dim)
 
-                self.key_cache[layer_idx] = torch.zeros(cache_shape, dtype=key_states.dtype, device=key_states.device)
-                self.value_cache[layer_idx] = torch.zeros(cache_shape, dtype=value_states.dtype, device=value_states.device)
+                self.key_cache[layer_idx] = torch.empty(cache_shape, dtype=key_states.dtype, device=key_states.device)
+                self.value_cache[layer_idx] = torch.empty(cache_shape, dtype=value_states.dtype, device=value_states.device)
 
             end_idx = current_len + input_seq_len
             if end_idx > self.max_capacity:

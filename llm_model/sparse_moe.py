@@ -109,18 +109,23 @@ class MoE(nn.Module):
         orig_shape = hidden_states.shape
         topk_idx, topk_weight, aux_loss = self.gate(hidden_states)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        flat_topk_idx = topk_idx.view(-1)
 
         if self.training:
-            hidden_states = hidden_states.repeat_interleave(
-                self.num_experts_per_tok, dim=0
-            )
-            y = torch.empty_like(hidden_states)
+            y = torch.zeros_like(hidden_states)
+
             for i, expert in enumerate(self.experts):
-                expert_output = expert(hidden_states[flat_topk_idx == i])
-                y[flat_topk_idx == i] = expert_output.to(y.dtype)
-            y = (y.view(*topk_weight.shape, -1) * topk_weight.unsqueeze(-1)).sum(dim=1)
-            y = y.to(hidden_states.dtype).view(*orig_shape)
+                batch_token_idx, k_idx = torch.where(topk_idx == i)
+
+                if batch_token_idx.numel() > 0:
+                    expert_input = hidden_states[batch_token_idx]
+                    expert_output = expert(expert_input)
+
+                    weights = topk_weight[batch_token_idx, k_idx].unsqueeze(-1)
+                    weighted_output = expert_output * weights.to(expert_output.dtype)
+
+                    y = y.index_add(0, batch_token_idx, weighted_output.to(y.dtype))
+
+            y = y.view(*orig_shape)
         else:
             y = self.moe_infer(hidden_states, topk_idx, topk_weight).view(*orig_shape)
 

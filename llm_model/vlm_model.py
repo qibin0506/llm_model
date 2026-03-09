@@ -5,21 +5,23 @@ from torch import nn
 from .llm_model import RMSNorm, LlmModel
 from .model_config import VLMConfig
 
-
 class MultiModalProjector(nn.Module):
     def __init__(self, config: VLMConfig):
         super().__init__()
 
-        self.input_projection_weight = nn.Parameter(
-            torch.zeros(config.vision_hidden_size, config.hidden_size)
-        )
+        self.patches_per_image = int(config.image_size // config.patch_size)
+        self.tokens_per_side = int(config.tokens_per_image ** 0.5)
+        self.kernel_size = self.patches_per_image // self.tokens_per_side
+
+        self.avg_pool = nn.AvgPool2d(kernel_size=self.kernel_size, stride=self.kernel_size)
 
         self.vision_norm = RMSNorm(config.vision_hidden_size)
 
-        self.patches_per_image = int(config.image_size // config.patch_size)
-        self.tokens_per_side = int(config.tokens_per_image**0.5)
-        self.kernel_size = self.patches_per_image // self.tokens_per_side
-        self.avg_pool = nn.AvgPool2d(kernel_size=self.kernel_size, stride=self.kernel_size)
+        self.projector = nn.Sequential(
+            nn.Linear(config.vision_hidden_size, config.hidden_size, bias=False),
+            nn.GELU(),
+            nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        )
 
     def forward(self, vision_outputs: torch.Tensor):
         # (batch_size, patches_per_image*patches_per_image, vision_hidden_size)
@@ -30,8 +32,7 @@ class MultiModalProjector(nn.Module):
         # (batch_size, vision_hidden_size, patches_per_image, patches_per_image)
         reshaped_vision_outputs = reshaped_vision_outputs.reshape(
             batch_size, vision_hidden_size, self.patches_per_image, self.patches_per_image
-        )
-        reshaped_vision_outputs = reshaped_vision_outputs.contiguous()
+        ).contiguous()
 
         # (batch_size, vision_hidden_size, tokens_per_side, tokens_per_side)
         pooled_vision_outputs = self.avg_pool(reshaped_vision_outputs)
@@ -43,10 +44,8 @@ class MultiModalProjector(nn.Module):
         normed_vision_outputs = self.vision_norm(pooled_vision_outputs)
 
         # (batch_size, tokens_per_side*tokens_per_side, hidden_size)
-        projected_vision_outputs = torch.matmul(
-            normed_vision_outputs,
-            self.input_projection_weight.to(normed_vision_outputs.dtype)
-        )
+        projected_vision_outputs = self.projector(normed_vision_outputs)
+
         return projected_vision_outputs.type_as(vision_outputs)
 
 
