@@ -419,7 +419,10 @@ class LlmModel(nn.Module):
         full_seq_len = past_seen_tokens + seq_len
 
         if position_ids is None:
-            position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
+            if attention_mask is not None and attention_mask.shape[1] == full_seq_len:
+                position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
+            else:
+                position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
 
         if attention_mask is None:
             # (batch_size, past_seen_tokens+seq_len)

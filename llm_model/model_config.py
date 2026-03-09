@@ -76,6 +76,9 @@ class MoEConfig:
     seq_aux: bool = True
     norm_topk_prob: bool = False
     z_loss_coef: float = 1e-4
+    router_jitter_noise = 0.01
+    capacity_factor = 1.25
+    drop_tokens = True
 
 
 @dataclass(kw_only=True)
