@@ -1,6 +1,7 @@
 from setuptools import setup, find_packages
 
-setup(name='project_llm_model',
+setup(
+    name='project_llm_model',
     version='0.8.0',
     description='LLM and VLM model',
     author='qibin',
