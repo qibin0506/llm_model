@@ -5,5 +5,8 @@ setup(name='project_llm_model',
     description='LLM and VLM model',
     author='qibin',
     author_email='qibin0506@gmail.com',
-    packages=find_packages()
+    packages=find_packages(),
+    install_requires=[
+        'torch>=2.0.0',
+    ],
 )
