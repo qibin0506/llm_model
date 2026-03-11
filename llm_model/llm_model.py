@@ -32,7 +32,7 @@ class RMSNorm(nn.Module):
     def forward(self, hidden_states):
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        variance = hidden_states.square().mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
 
@@ -220,8 +220,19 @@ class Attention(nn.Module):
                         # (batch, num_key_value_heads, 1, seq_len, head_size) ->
                         # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size) ->
                         # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
-                        key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
-                        value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+                        key_states = key_states[:, :, None, :, :].expand(
+                            batch, self.num_key_value_heads, self.num_key_value_groups, key_states.shape[-2], self.head_size
+                        )
+                        key_states = key_states.reshape(
+                            batch, self.num_key_value_heads * self.num_key_value_groups, key_states.shape[-2], self.head_size
+                        )
+
+                        value_states = value_states[:, :, None, :, :].expand(
+                            batch, self.num_key_value_heads, self.num_key_value_groups, value_states.shape[-2], self.head_size
+                        )
+                        value_states = value_states.reshape(
+                            batch, self.num_key_value_heads * self.num_key_value_groups, value_states.shape[-2], self.head_size
+                        )
 
                     attn = F.scaled_dot_product_attention(
                         query=query_states,
@@ -240,8 +251,19 @@ class Attention(nn.Module):
                 # (batch, num_key_value_heads, 1, seq_len, head_size) ->
                 # (batch, num_key_value_heads, num_key_value_groups=num_heads//num_key_value_heads, seq_len, head_size) ->
                 # (batch, num_heads=num_key_value_heads*num_key_value_groups, seq_len, head_size)
-                key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
-                value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+                key_states = key_states[:, :, None, :, :].expand(
+                    batch, self.num_key_value_heads, self.num_key_value_groups, key_states.shape[-2], self.head_size
+                )
+                key_states = key_states.reshape(
+                    batch, self.num_key_value_heads * self.num_key_value_groups, key_states.shape[-2], self.head_size
+                )
+
+                value_states = value_states[:, :, None, :, :].expand(
+                    batch, self.num_key_value_heads, self.num_key_value_groups, value_states.shape[-2], self.head_size
+                )
+                value_states = value_states.reshape(
+                    batch, self.num_key_value_heads * self.num_key_value_groups, value_states.shape[-2], self.head_size
+                )
 
             # (batch, num_heads, q_seq_len, k_seq_len)
             attn_scores = (self.scale * query_states) @ key_states.transpose(-1, -2)
@@ -419,10 +441,15 @@ class LlmModel(nn.Module):
         full_seq_len = past_seen_tokens + seq_len
 
         if position_ids is None:
-            if attention_mask is not None and attention_mask.shape[1] == full_seq_len:
+            if attention_mask is not None and attention_mask.shape[-1] == full_seq_len:
                 position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
+                position_ids = position_ids[:, -seq_len:]
             else:
-                position_ids = torch.arange(past_seen_tokens, full_seq_len, device=inputs_embeds.device).unsqueeze(0)
+                position_ids = torch.arange(
+                    past_seen_tokens,
+                    full_seq_len,
+                    device=inputs_embeds.device
+                ).unsqueeze(0).expand(batch_size, -1)
 
         if attention_mask is None:
             # (batch_size, past_seen_tokens+seq_len)
