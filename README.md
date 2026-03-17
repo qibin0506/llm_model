@@ -28,7 +28,9 @@
 
     *   完整的 **KV Cache** 实现，支持高效的自回归解码。
     *   支持梯度检查点 (Gradient Checkpointing) 以节省训练显存。
- 
+*   **支持Attention Residuals**:
+
+    *   支持配置Attention Residuals。
 *   **配套训练和推理框架**:
     *   [https://github.com/qibin0506/llm_trainer](https://github.com/qibin0506/llm_trainer)
 
@@ -56,7 +58,7 @@ python3 setup.py install
 
 ``` Python
 import torch
-from llm_model import LlmModel, ModelConfig, RoPEConfig
+from llm_model import LlmModel, ModelConfig, RoPEConfig, AttnResConfig
 
 # 配置一个简单的 LLM
 config = ModelConfig(
@@ -71,7 +73,8 @@ config = ModelConfig(
         rope_type='yarn',   # 使用 YaRN 支持长文本
         rope_theta=10000.0,
         factor=8.0          # 扩展系数
-    )
+    ),
+    attn_res_config=AttnResConfig() if use_attn_res else None
 )
 
 model = LlmModel(config)
@@ -150,6 +153,13 @@ vlm_model = VlmModel(vlm_config)
 | `n_shared_experts`    | int    | 共享专家数量 (总是激活)            |
 | `intermediate_size`   | int    | 单个专家的维度                  |
 | `seq_aux`             | bool   | 是否计算序列级辅助损失              |
+
+### AttnResConfig (注意力残差)
+
+| **参数**                | **类型** | **说明**                   |
+| :-------------------- | :----- | :----------------------- |
+| `num_blocks` | int    | Attention Residuals块个数 |
+
 
 ## 📂 项目结构
 
