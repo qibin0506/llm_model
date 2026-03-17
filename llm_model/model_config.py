@@ -82,6 +82,16 @@ class MoEConfig:
 
 
 @dataclass(kw_only=True)
+class AttnResConfig:
+    """
+    Attention Residuals Config
+    Args:
+        num_blocks (`int`, default is 8)
+    """
+    num_blocks: int = 8
+
+
+@dataclass(kw_only=True)
 class Config:
     """
     llm model config
@@ -136,6 +146,7 @@ class Config:
     tie_word_embeddings: bool = False
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
+    attn_res_config: Optional[AttnResConfig] = None
 
     def __post_init__(self):
         if self.num_key_value_heads is None:

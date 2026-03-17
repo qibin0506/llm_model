@@ -1,14 +1,9 @@
 from typing import Optional, Tuple, Dict
 from packaging import version
 import inspect
-
 import torch
 from torch import nn
 import torch.nn.functional as F
-
-try:
-    import deepspeed
-except: ...
 
 from .model_config import Config
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
@@ -17,10 +12,37 @@ from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
 
 try:
+    import deepspeed
+except: ...
+
+try:
     _sdpa_params = inspect.signature(F.scaled_dot_product_attention).parameters
     _SDPA_SUPPORT_GQA = 'enable_gqa' in _sdpa_params
 except ValueError:
     _SDPA_SUPPORT_GQA = False
+
+
+class BlockAttnRes(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(hidden_size))
+        self.norm = RMSNorm(hidden_size)
+
+    def forward(self, blocks: list[torch.Tensor], partial_block: torch.Tensor):
+        # [N+1, B, T, D]
+        if len(blocks) > 0:
+            V = torch.stack(blocks + [partial_block], dim=0)
+        else:
+            V = partial_block.unsqueeze(0)
+
+        K = self.norm(V)
+
+        # [N+1, B, T]
+        logits = torch.einsum('d, n b t d -> n b t', self.weight, K)
+        scores = logits.softmax(dim=0)
+        # [B, T, D]
+        h = torch.einsum('n b t, n b t d -> b t d', scores, V)
+        return h
 
 
 class RMSNorm(nn.Module):
@@ -289,10 +311,10 @@ class Attention(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, config: Config, layer_idx: int, use_sdpa_attention: bool):
         super().__init__()
+        self.layer_idx = layer_idx
 
         self.attn_norm = RMSNorm(config.hidden_size)
         self.attn = Attention(config, layer_idx, use_sdpa_attention)
-
         self.mlp_norm = RMSNorm(config.hidden_size)
 
         use_moe = (
@@ -309,13 +331,48 @@ class DecoderLayer(nn.Module):
         else:
             self.mlp = MLP(config)
 
+        self.attn_res_config = config.attn_res_config
+        if self.attn_res_config is not None:
+            # block_size = num_hidden_layers / attn_res_num_blocks
+            self.layers_per_block = config.num_hidden_layers // self.attn_res_config.num_blocks
+            self.attn_res_agg = BlockAttnRes(config.hidden_size)
+            self.mlp_res_agg = BlockAttnRes(config.hidden_size)
+
     def forward(
             self,
             hidden_states: torch.Tensor,
             position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
             attention_mask: Optional[torch.Tensor] = None,
-            past_key_values: Optional[KVCache] = None
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+            past_key_values: Optional[KVCache] = None,
+            blocks: Optional[list[torch.Tensor]] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[list[torch.Tensor]]]:
+        if self.attn_res_config is not None:
+            # Block Attention Residuals
+            partial_block = hidden_states
+            h = self.attn_res_agg(blocks, partial_block)
+            if self.layer_idx % self.layers_per_block == 0:
+                blocks.append(partial_block)
+                partial_block = None
+
+            attn_out = self.attn(
+                hidden_states=self.attn_norm(h),
+                position_embeddings=position_embeddings,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values
+            )
+            partial_block = partial_block + attn_out if partial_block is not None else attn_out
+
+            h = self.mlp_res_agg(blocks, partial_block)
+            if isinstance(self.mlp, MoE):
+                mlp_states, aux_loss = self.mlp(self.mlp_norm(h))
+            else:
+                mlp_states = self.mlp(self.mlp_norm(h))
+                aux_loss = None
+            partial_block = partial_block + mlp_states
+
+            return partial_block, aux_loss, blocks
+
+        # standard residual
         residual = hidden_states
         hidden_states = self.attn(
             hidden_states=self.attn_norm(hidden_states),
@@ -323,7 +380,6 @@ class DecoderLayer(nn.Module):
             attention_mask=attention_mask,
             past_key_values=past_key_values
         )
-
         hidden_states = hidden_states + residual
 
         if isinstance(self.mlp, MoE):
@@ -331,10 +387,9 @@ class DecoderLayer(nn.Module):
         else:
             mlp_states = self.mlp(self.mlp_norm(hidden_states))
             aux_loss = None
-
         hidden_states = mlp_states + hidden_states
 
-        return hidden_states, aux_loss
+        return hidden_states, aux_loss, blocks
 
 
 class LlmModel(nn.Module):
@@ -342,6 +397,9 @@ class LlmModel(nn.Module):
         super().__init__()
         self.config = config
         self.gradient_checkpointing = False
+
+        if config.attn_res_config is not None:
+            assert config.num_hidden_layers % config.attn_res_config.num_blocks == 0
 
         if config.attention_implementation == 'auto':
             self.use_sdpa_attention = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
@@ -382,14 +440,32 @@ class LlmModel(nn.Module):
 
     def _create_custom_forward(self, module):
         def custom_forward(*inputs):
-            # inputs: hidden_states, attention_mask, cos, sin
-            h, m, c, s = inputs
-            return module(
+            # inputs: hidden_states, attention_mask, cos, sin, blocks
+            h = inputs[0]
+            m = inputs[1]
+            c = inputs[2]
+            s = inputs[3]
+            num_input_blocks = len(inputs) - 4
+
+            if self.config.attn_res_config is not None:
+                blocks = list(inputs[4:])
+            else:
+                blocks = None
+
+            out_h, out_aux, out_blocks = module(
                 hidden_states=h,
                 position_embeddings=(c, s),
                 attention_mask=m,
-                past_key_values=None
+                past_key_values=None,
+                blocks=blocks
             )
+
+            res = [out_h, out_aux]
+            if out_blocks is not None and blocks is not None:
+                if len(out_blocks) > num_input_blocks:
+                    res.append(out_blocks[-1])
+
+            return tuple(res)
 
         return custom_forward
 
@@ -479,24 +555,35 @@ class LlmModel(nn.Module):
 
         hidden_states = inputs_embeds
         aux_losses = ()
+        blocks = [] if self.config.attn_res_config is not None else None
 
         for layer in self.layers:
             if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
                 cos, sin = position_embeddings
-                layer_outputs = deepspeed.checkpointing.checkpoint(
-                    self._create_custom_forward(layer),
-                    hidden_states,
-                    causal_mask,
-                    cos,
-                    sin
-                )
-                hidden_states, aux_loss = layer_outputs
+                custom_forward = self._create_custom_forward(layer)
+                if blocks is not None:
+                    layer_outputs = deepspeed.checkpointing.checkpoint(
+                        custom_forward,
+                        hidden_states, causal_mask, cos, sin, *blocks
+                    )
+                    hidden_states = layer_outputs[0]
+                    aux_loss = layer_outputs[1]
+                    if len(layer_outputs) > 2:
+                        blocks.append(layer_outputs[2])
+                else:
+                    layer_outputs = deepspeed.checkpointing.checkpoint(
+                        custom_forward,
+                        hidden_states, causal_mask, cos, sin
+                    )
+                    hidden_states = layer_outputs[0]
+                    aux_loss = layer_outputs[1]
             else:
-                hidden_states, aux_loss = layer(
+                hidden_states, aux_loss, blocks = layer(
                     hidden_states=hidden_states,
                     position_embeddings=position_embeddings,
                     attention_mask=causal_mask,
-                    past_key_values=past_key_values
+                    past_key_values=past_key_values,
+                    blocks=blocks
                 )
 
             if aux_loss is not None:
@@ -504,7 +591,6 @@ class LlmModel(nn.Module):
 
         # (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
-
         # (batch, seq_len, vocab_size)
         head = self.lm_head(hidden_states)
 

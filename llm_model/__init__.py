@@ -9,5 +9,6 @@ LlmDecoderLayer = llm_model.DecoderLayer
 ModelConfig = model_config.Config
 RoPEConfig = model_config.RoPEConfig
 MoEConfig = model_config.MoEConfig
+AttnResConfig = model_config.AttnResConfig
 VLMConfig = model_config.VLMConfig
 KVCache = kv_cache.KVCache
