@@ -1,6 +1,6 @@
 # LLM Model PyTorch
 
-这是一个灵活且高效的 PyTorch 实现的大语言模型（LLM）和视觉语言模型（VLM）库。该项目旨在提供一个简洁的代码库，用于训练和推理现代 Transformer 模型，支持 **Mixture of Experts (MoE)**、**RoPE (YaRN/Dynamic)** 以及 **GQA/MQA** 等前沿技术。
+这是一个灵活且高效的 PyTorch 实现的大语言模型（LLM）和视觉语言模型（VLM）库。该项目旨在提供一个简洁的代码库，用于训练和推理现代 Transformer 模型，支持 **Mixture of Experts (MoE)**、**RoPE (YaRN/Dynamic)** 以及 **GQA/MQA** 和 **Attention Residuals** 等前沿技术。
 
 ## ✨ 核心特性 (Key Features)
 
