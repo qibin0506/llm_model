@@ -20,7 +20,7 @@ class KVCache:
         empty_cache = (
                 len(self.key_cache) == 0
                 or len(self.key_cache) <= layer_idx
-                or len(self.key_cache[layer_idx]) == 0
+                or self.key_cache[layer_idx].numel() == 0
         )
 
         return self.key_cache[layer_idx].shape[-2] if not empty_cache else 0
@@ -59,7 +59,7 @@ class KVCache:
                 self.value_cache[layer_idx][..., :end_idx, :]
             )
 
-        if len(self.key_cache[layer_idx]) == 0:
+        if self.key_cache[layer_idx].numel() == 0:
             self.key_cache[layer_idx] = key_states
             self.value_cache[layer_idx] = value_states
         else:

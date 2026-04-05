@@ -136,7 +136,7 @@ class Config:
     intermediate_size: int
     num_hidden_layers: int
     num_attention_heads: int
-    num_key_value_heads: int
+    num_key_value_heads: Optional[int] = None
     max_position_embeddings: int
     original_max_position_embeddings: Optional[int] = None
     attention_dropout: float = 0.1

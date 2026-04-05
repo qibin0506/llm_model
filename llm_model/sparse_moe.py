@@ -44,6 +44,7 @@ class MoEGate(nn.Module):
             hidden_states.to(torch.float32), self.weight.to(torch.float32), None
         )
 
+        clean_logits = logits
         if self.training and self.config.moe_config.router_jitter_noise > 0:
             noise = (torch.rand_like(logits) - 0.5) * 2.0 * self.config.moe_config.router_jitter_noise
             logits = logits + noise
@@ -65,7 +66,7 @@ class MoEGate(nn.Module):
         ### expert-level computation auxiliary loss
         if self.training:
             # z_loss: log(sum(exp(x)))^2
-            z_loss = torch.logsumexp(logits, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
+            z_loss = torch.logsumexp(clean_logits, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
 
             scores_for_aux = scores
             aux_topk = self.top_k

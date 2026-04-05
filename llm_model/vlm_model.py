@@ -5,6 +5,7 @@ from torch import nn
 from .llm_model import RMSNorm, LlmModel
 from .model_config import VLMConfig
 
+
 class MultiModalProjector(nn.Module):
     def __init__(self, config: VLMConfig):
         super().__init__()
@@ -81,19 +82,20 @@ class VlmModel(LlmModel):
         pixel_values: Optional[torch.Tensor] = kwargs.get('pixel_values', None)
 
         if pixel_values is not None:
-            # (num_total_images, tokens_per_image, hidden_size)
-            image_features = self.get_image_features(pixel_values)
-            image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-
             # (batch_size, seq_len)
             image_mask = (input_ids == self.vlm_config.image_tok)
-
             num_image_tokens_in_text = image_mask.sum().item()
-            num_image_features = image_features.shape[0] * image_features.shape[1]
 
-            if num_image_tokens_in_text != num_image_features:
-                raise ValueError('num_image_tokens_in_text != num_image_features')
+            if num_image_tokens_in_text > 0:
+                # (num_total_images, tokens_per_image, hidden_size)
+                image_features = self.get_image_features(pixel_values)
+                image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
 
-            inputs_embeds[image_mask] = image_features.reshape(-1, image_features.shape[-1])
+                num_image_features = image_features.shape[0] * image_features.shape[1]
+
+                if num_image_tokens_in_text != num_image_features:
+                    raise ValueError('num_image_tokens_in_text != num_image_features')
+
+                inputs_embeds[image_mask] = image_features.reshape(-1, image_features.shape[-1])
 
         return inputs_embeds
