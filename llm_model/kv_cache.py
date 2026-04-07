@@ -20,7 +20,7 @@ class KVCache:
         empty_cache = (
                 len(self.key_cache) == 0
                 or len(self.key_cache) <= layer_idx
-                or self.key_cache[layer_idx].numel() == 0
+                or self.key_cache[layer_idx] is None
         )
 
         return self.key_cache[layer_idx].shape[-2] if not empty_cache else 0
@@ -28,16 +28,17 @@ class KVCache:
     def update(self, key_states, value_states, layer_idx):
         if len(self.key_cache) <= layer_idx:
             for _ in range(len(self.key_cache), layer_idx + 1):
-                self.key_cache.append(torch.empty(0))
-                self.value_cache.append(torch.empty(0))
+                self.key_cache.append(None)
+                self.value_cache.append(None)
                 self.lengths.append(0)
 
         input_seq_len = key_states.shape[-2]
+        current_batch = key_states.shape[0]
 
         if self.max_capacity > 0:
             current_len = self.lengths[layer_idx]
 
-            if self.key_cache[layer_idx].numel() == 0:
+            if self.key_cache[layer_idx] is None or self.key_cache[layer_idx].shape[0] != current_batch:
                 batch_size, num_heads, _, head_dim = key_states.shape
                 # 申请最大显存
                 cache_shape = (batch_size, num_heads, self.max_capacity, head_dim)
@@ -59,7 +60,7 @@ class KVCache:
                 self.value_cache[layer_idx][..., :end_idx, :]
             )
 
-        if self.key_cache[layer_idx].numel() == 0:
+        if self.key_cache[layer_idx] is None:
             self.key_cache[layer_idx] = key_states
             self.value_cache[layer_idx] = value_states
         else:
