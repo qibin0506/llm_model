@@ -368,12 +368,15 @@ class LlmModel(nn.Module):
                 blocks=blocks
             )
 
-            res = [out_h, out_aux]
+            res = [out_h]
+            if out_aux is not None:
+                res.append(out_aux)
+
             if out_blocks is not None and blocks is not None:
                 if len(out_blocks) > num_input_blocks:
                     res.append(out_blocks[-1])
 
-            return tuple(res)
+            return tuple(res) if len(res) > 1 else res[0]
 
         return custom_forward
 
@@ -474,17 +477,26 @@ class LlmModel(nn.Module):
                         custom_forward,
                         hidden_states, causal_mask, cos, sin, *blocks
                     )
-                    hidden_states = layer_outputs[0]
-                    aux_loss = layer_outputs[1]
-                    if len(layer_outputs) > 2:
-                        blocks.append(layer_outputs[2])
                 else:
                     layer_outputs = self._checkpoint_func(
                         custom_forward,
                         hidden_states, causal_mask, cos, sin
                     )
-                    hidden_states = layer_outputs[0]
-                    aux_loss = layer_outputs[1]
+
+                if not isinstance(layer_outputs, tuple):
+                    layer_outputs = (layer_outputs,)
+
+                hidden_states = layer_outputs[0]
+                output_idx = 1
+
+                if isinstance(layer.mlp, MoE):
+                    aux_loss = layer_outputs[output_idx]
+                    output_idx += 1
+                else:
+                    aux_loss = None
+
+                if blocks is not None and len(layer_outputs) > output_idx:
+                    blocks.append(layer_outputs[output_idx])
             else:
                 hidden_states, aux_loss, blocks = layer(
                     hidden_states=hidden_states,
