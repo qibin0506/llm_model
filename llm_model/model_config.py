@@ -1,4 +1,4 @@
-from typing import List, Optional, Callable
+from typing import Optional, Callable
 from dataclasses import dataclass, field
 import torch
 

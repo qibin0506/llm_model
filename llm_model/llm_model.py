@@ -1,6 +1,8 @@
 from typing import Optional, Tuple, Dict
+from functools import partial
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 from .model_config import Config
 from .attention_interface import get_attention_interface, supports_fused_causal_mask
@@ -8,10 +10,6 @@ from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
-
-try:
-    import deepspeed
-except: ...
 
 
 class BlockAttnRes(nn.Module):
@@ -301,6 +299,7 @@ class LlmModel(nn.Module):
         super().__init__()
         self.config = config
         self.gradient_checkpointing = False
+        self._checkpoint_func = None
 
         if config.attn_res_config is not None:
             assert config.num_hidden_layers % config.attn_res_config.num_blocks == 0
@@ -336,6 +335,16 @@ class LlmModel(nn.Module):
 
     def gradient_checkpointing_enable(self):
         self.gradient_checkpointing = True
+
+        if self._checkpoint_func is None:
+            try:
+                import deepspeed
+                self._checkpoint_func = deepspeed.checkpointing.checkpoint
+            except ImportError:
+                self._checkpoint_func = partial(torch_checkpoint, use_reentrant=False)
+
+    def gradient_checkpointing_disable(self):
+        self.gradient_checkpointing = False
 
     def _create_custom_forward(self, module):
         def custom_forward(*inputs):
@@ -461,7 +470,7 @@ class LlmModel(nn.Module):
                 cos, sin = position_embeddings
                 custom_forward = self._create_custom_forward(layer)
                 if blocks is not None:
-                    layer_outputs = deepspeed.checkpointing.checkpoint(
+                    layer_outputs = self._checkpoint_func(
                         custom_forward,
                         hidden_states, causal_mask, cos, sin, *blocks
                     )
@@ -470,7 +479,7 @@ class LlmModel(nn.Module):
                     if len(layer_outputs) > 2:
                         blocks.append(layer_outputs[2])
                 else:
-                    layer_outputs = deepspeed.checkpointing.checkpoint(
+                    layer_outputs = self._checkpoint_func(
                         custom_forward,
                         hidden_states, causal_mask, cos, sin
                     )
