@@ -105,7 +105,7 @@ def _compute_yarn_parameters(
     if original_max_position_embeddings:
         factor = config.max_position_embeddings / original_max_position_embeddings
     else:
-        original_max_position_embeddings = config.max_position_embeddings
+        original_max_position_embeddings = int(config.max_position_embeddings / factor)
 
     def get_mscale(scale, mscale=1.0):
         if scale <= 1:

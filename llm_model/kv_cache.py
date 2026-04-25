@@ -46,6 +46,9 @@ class KVCache:
                 self.key_cache[layer_idx] = torch.empty(cache_shape, dtype=key_states.dtype, device=key_states.device)
                 self.value_cache[layer_idx] = torch.empty(cache_shape, dtype=value_states.dtype, device=value_states.device)
 
+                self.lengths[layer_idx] = 0
+                current_len = 0
+
             end_idx = current_len + input_seq_len
             if end_idx > self.max_capacity:
                 raise ValueError(f"KVCache capacity exceeded: max {self.max_capacity}, but trying to reach {end_idx}")
