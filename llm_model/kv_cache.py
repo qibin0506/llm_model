@@ -40,14 +40,29 @@ class KVCache:
 
             if self.key_cache[layer_idx] is None or self.key_cache[layer_idx].shape[0] != current_batch:
                 batch_size, num_heads, _, head_dim = key_states.shape
-                # 申请最大显存
-                cache_shape = (batch_size, num_heads, self.max_capacity, head_dim)
 
-                self.key_cache[layer_idx] = torch.empty(cache_shape, dtype=key_states.dtype, device=key_states.device)
-                self.value_cache[layer_idx] = torch.empty(cache_shape, dtype=value_states.dtype, device=value_states.device)
+                if self.key_cache[layer_idx] is not None and self.key_cache[layer_idx].shape[0] < current_batch:
+                    repeat_factor = current_batch // self.key_cache[layer_idx].shape[0]
+                    old_keys = self.key_cache[layer_idx][..., :current_len, :]
+                    old_vals = self.value_cache[layer_idx][..., :current_len, :]
 
-                self.lengths[layer_idx] = 0
-                current_len = 0
+                    cache_shape = (batch_size, num_heads, self.max_capacity, head_dim)
+                    new_key_cache = torch.empty(cache_shape, dtype=key_states.dtype, device=key_states.device)
+                    new_val_cache = torch.empty(cache_shape, dtype=value_states.dtype, device=value_states.device)
+
+                    new_key_cache[..., :current_len, :] = old_keys.repeat_interleave(repeat_factor, dim=0)
+                    new_val_cache[..., :current_len, :] = old_vals.repeat_interleave(repeat_factor, dim=0)
+
+                    self.key_cache[layer_idx] = new_key_cache
+                    self.value_cache[layer_idx] = new_val_cache
+                else:
+                    cache_shape = (batch_size, num_heads, self.max_capacity, head_dim)
+                    self.key_cache[layer_idx] = torch.empty(cache_shape, dtype=key_states.dtype,
+                                                            device=key_states.device)
+                    self.value_cache[layer_idx] = torch.empty(cache_shape, dtype=value_states.dtype,
+                                                              device=value_states.device)
+                    self.lengths[layer_idx] = 0
+                    current_len = 0
 
             end_idx = current_len + input_seq_len
             if end_idx > self.max_capacity:
@@ -67,6 +82,15 @@ class KVCache:
             self.key_cache[layer_idx] = key_states
             self.value_cache[layer_idx] = value_states
         else:
+            if self.key_cache[layer_idx].shape[0] < current_batch:
+                repeat_factor = current_batch // self.key_cache[layer_idx].shape[0]
+                self.key_cache[layer_idx] = self.key_cache[layer_idx].repeat_interleave(repeat_factor, dim=0)
+                self.value_cache[layer_idx] = self.value_cache[layer_idx].repeat_interleave(repeat_factor, dim=0)
+            elif self.key_cache[layer_idx].shape[0] > current_batch:
+                self.key_cache[layer_idx] = key_states
+                self.value_cache[layer_idx] = value_states
+                return self.key_cache[layer_idx], self.value_cache[layer_idx]
+
             self.key_cache[layer_idx] = torch.cat((self.key_cache[layer_idx], key_states), dim=-2)
             self.value_cache[layer_idx] = torch.cat((self.value_cache[layer_idx], value_states), dim=-2)
 

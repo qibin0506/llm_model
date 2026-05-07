@@ -429,7 +429,7 @@ class LlmModel(nn.Module):
 
         if position_ids is None:
             if attention_mask is not None and attention_mask.shape[-1] == full_seq_len:
-                position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
+                position_ids = (attention_mask.long().cumsum(dim=-1) - 1).clamp(min=0)
                 position_ids = position_ids[:, -seq_len:]
             else:
                 position_ids = torch.arange(
@@ -439,17 +439,16 @@ class LlmModel(nn.Module):
                 ).unsqueeze(0).expand(batch_size, -1)
 
         if attention_mask is None:
-            # (batch_size, past_seen_tokens+seq_len)
-            # all true, no paddings for mask
-            attention_mask = torch.ones(
-                (batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device
-            )
+            # (batch_size, past_seen_tokens+seq_len), all true, no paddings for mask
+            causal_attention_mask = torch.ones((batch_size, full_seq_len), dtype=torch.bool, device=inputs_embeds.device)
+        else:
+            causal_attention_mask = attention_mask
 
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
         fused_causal_mask = False
         if supports_fused_causal_mask(self.config) and seq_len > 1 and past_seen_tokens == 0:
-            if attention_mask.dim() == 2 and attention_mask.all():
+            if attention_mask is None:
                 fused_causal_mask = True
 
         if fused_causal_mask:
@@ -457,7 +456,7 @@ class LlmModel(nn.Module):
         else:
             # (bsz, 1, seq_len, full_seq_len)
             causal_mask = prepare_decoder_attention_mask(
-                attention_mask=attention_mask,
+                attention_mask=causal_attention_mask,
                 input_shape=(batch_size, seq_len),
                 past_key_values_length=past_seen_tokens,
                 dtype=inputs_embeds.dtype,

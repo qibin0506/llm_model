@@ -10,14 +10,9 @@ def _expand_mask(
     """
     Expands attention_mask from `[bsz, seq_len]` to `[bsz, 1, tgt_seq_len, src_seq_len]`.
     """
-    if len(mask.size()) == 3:
-        bsz, src_len, _ = mask.size()
-        tgt_len = tgt_len if tgt_len is not None else src_len
-        expanded_mask = mask[:,None,:,:].expand(bsz, 1, tgt_len, src_len).to(dtype)
-    else:
-        bsz, src_len = mask.size()
-        tgt_len = tgt_len if tgt_len is not None else src_len
-        expanded_mask = mask[:, None, None, :].expand(bsz, 1, tgt_len, src_len).to(dtype)
+    bsz, src_len = mask.size()
+    tgt_len = tgt_len if tgt_len is not None else src_len
+    expanded_mask = mask[:, None, None, :].expand(bsz, 1, tgt_len, src_len).to(dtype)
 
     # [true, true, true, false] -> [0, 0, 0, 1]
     inverted_mask = 1.0 - expanded_mask
