@@ -245,9 +245,9 @@ class DecoderLayer(nn.Module):
             hidden_states: torch.Tensor,
             position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
             attention_mask: Optional[torch.Tensor] = None,
+            padding_mask: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
-            blocks: Optional[list[torch.Tensor]] = None,
-            padding_mask: Optional[torch.Tensor] = None
+            blocks: Optional[list[torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[list[torch.Tensor]]]:
         if self.attn_res_config is not None:
             # Block Attention Residuals
@@ -349,12 +349,12 @@ class LlmModel(nn.Module):
 
     def _create_custom_forward(self, module):
         def custom_forward(*inputs):
-            # inputs: hidden_states, attention_mask, cos, sin, blocks
-            h = inputs[0]
-            m = inputs[1]
-            c = inputs[2]
-            s = inputs[3]
-            padding_mask = inputs[4]
+            # inputs: hidden_states, attention_mask, padding_mask, cos, sin, blocks
+            hidden_states = inputs[0]
+            attention_mask = inputs[1]
+            padding_mask = inputs[2]
+            cos = inputs[3]
+            sin = inputs[4]
             num_input_blocks = len(inputs) - 5
 
             if self.config.attn_res_config is not None:
@@ -363,12 +363,12 @@ class LlmModel(nn.Module):
                 blocks = None
 
             out_h, out_aux, out_blocks = module(
-                hidden_states=h,
-                position_embeddings=(c, s),
-                attention_mask=m,
+                hidden_states=hidden_states,
+                position_embeddings=(cos, sin),
+                attention_mask=attention_mask,
+                padding_mask=padding_mask,
                 past_key_values=None,
-                blocks=blocks,
-                padding_mask=padding_mask
+                blocks=blocks
             )
 
             res = [out_h]
@@ -477,12 +477,12 @@ class LlmModel(nn.Module):
                 if blocks is not None:
                     layer_outputs = self._checkpoint_func(
                         custom_forward,
-                        hidden_states, causal_mask, cos, sin, causal_attention_mask, *blocks
+                        hidden_states, causal_mask, causal_attention_mask, cos, sin, *blocks
                     )
                 else:
                     layer_outputs = self._checkpoint_func(
                         custom_forward,
-                        hidden_states, causal_mask, cos, sin, causal_attention_mask
+                        hidden_states, causal_mask, causal_attention_mask, cos, sin
                     )
 
                 if not isinstance(layer_outputs, tuple):
@@ -504,9 +504,9 @@ class LlmModel(nn.Module):
                     hidden_states=hidden_states,
                     position_embeddings=position_embeddings,
                     attention_mask=causal_mask,
+                    padding_mask=causal_attention_mask,
                     past_key_values=past_key_values,
-                    blocks=blocks,
-                    padding_mask=causal_attention_mask
+                    blocks=blocks
                 )
 
             if aux_loss is not None:
