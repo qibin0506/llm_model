@@ -88,6 +88,7 @@ class MoEGate(nn.Module):
                 fi = ce * self.n_routed_experts
                 aux_loss = (Pi * fi).sum()
 
+            aux_loss = aux_loss * self.config.moe_config.aux_loss_coef
             aux_loss += z_loss
         else:
             aux_loss = None

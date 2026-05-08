@@ -75,6 +75,7 @@ class MoEConfig:
     routed_scaling_factor: float = 1.0
     seq_aux: bool = True
     norm_topk_prob: bool = False
+    aux_loss_coef: float = 1e-3
     z_loss_coef: float = 1e-4
     router_jitter_noise = 0.01
     capacity_factor = 1.25
