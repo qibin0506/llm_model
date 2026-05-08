@@ -27,7 +27,7 @@ class MoEGate(nn.Module):
     def reset_parameters(self) -> None:
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, padding_mask=None):
         orig_shape = hidden_states.shape
         h = orig_shape[-1]
 
@@ -65,28 +65,48 @@ class MoEGate(nn.Module):
 
         ### expert-level computation auxiliary loss
         if self.training:
-            # z_loss: log(sum(exp(x)))^2
-            z_loss = torch.logsumexp(clean_logits, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
-
-            scores_for_aux = scores
-            aux_topk = self.top_k
-            # always compute aux loss based on the naive greedy topk method
-            topk_idx_for_aux_loss = topk_idx.view(bsz, -1)
-            if self.seq_aux:
-                scores_for_seq_aux = scores_for_aux.view(bsz, seq_len, -1)
-                ce = torch.zeros(bsz, self.n_routed_experts, device=hidden_states.device, dtype=torch.float32)
-                ones_tensor = torch.ones_like(topk_idx_for_aux_loss, dtype=torch.float32)
-                ce.scatter_add_(1, topk_idx_for_aux_loss, ones_tensor)
-                ce.div_(seq_len * aux_topk / self.n_routed_experts)
-                aux_loss = (ce * scores_for_seq_aux.mean(dim=1)).sum(dim=1).mean()
+            if padding_mask is not None:
+                valid_mask_2d = padding_mask.to(dtype=torch.bool, device=hidden_states.device)
+                valid_mask_flat = valid_mask_2d.view(-1)
             else:
-                mask_ce = F.one_hot(
-                    topk_idx_for_aux_loss.view(-1), num_classes=self.n_routed_experts
-                )
-                ce = mask_ce.float().mean(0)
-                Pi = scores_for_aux.mean(0)
-                fi = ce * self.n_routed_experts
-                aux_loss = (Pi * fi).sum()
+                valid_mask_2d = torch.ones((bsz, seq_len), dtype=torch.bool, device=hidden_states.device)
+                valid_mask_flat = torch.ones(bsz * seq_len, dtype=torch.bool, device=hidden_states.device)
+
+            clean_logits_valid = clean_logits[valid_mask_flat]
+            if clean_logits_valid.numel() > 0:
+                # z_loss: log(sum(exp(x)))^2
+                z_loss = torch.logsumexp(clean_logits_valid, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
+            else:
+                z_loss = torch.tensor(0.0, device=hidden_states.device, dtype=torch.float32)
+
+            if self.seq_aux:
+                scores_for_seq_aux = scores.view(bsz, seq_len, -1)
+                topk_idx_for_aux_loss = topk_idx.view(bsz, seq_len, self.top_k)
+
+                # (bsz, seq_len, n_experts)
+                mask_ce = F.one_hot(topk_idx_for_aux_loss, num_classes=self.n_routed_experts).sum(dim=2).float()
+
+                mask_ce = mask_ce * valid_mask_2d.unsqueeze(-1).float()
+                scores_for_seq_aux = scores_for_seq_aux * valid_mask_2d.unsqueeze(-1).float()
+
+                actual_seq_lens = valid_mask_2d.sum(dim=1, keepdim=True).float().clamp(min=1.0)
+
+                ce = mask_ce.sum(dim=1) / (actual_seq_lens * self.top_k / self.n_routed_experts)
+                mean_scores = scores_for_seq_aux.sum(dim=1) / actual_seq_lens
+
+                aux_loss = (ce * mean_scores).sum(dim=1).mean()
+            else:
+                topk_idx_valid = topk_idx[valid_mask_flat]
+                scores_valid = scores[valid_mask_flat]
+
+                if topk_idx_valid.numel() > 0:
+                    mask_ce = F.one_hot(topk_idx_valid.view(-1), num_classes=self.n_routed_experts)
+                    ce = mask_ce.float().mean(0)
+                    Pi = scores_valid.mean(0)
+                    fi = ce * self.n_routed_experts
+                    aux_loss = (Pi * fi).sum()
+                else:
+                    aux_loss = torch.tensor(0.0, device=hidden_states.device, dtype=torch.float32)
 
             aux_loss = aux_loss * self.config.moe_config.aux_loss_coef
             aux_loss += z_loss
@@ -116,11 +136,11 @@ class MoE(nn.Module):
             intermediate_size = config.moe_config.intermediate_size * config.moe_config.n_shared_experts
             self.shared_experts = layer(config, intermediate_size=intermediate_size)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, padding_mask=None):
         identity = hidden_states
         orig_shape = hidden_states.shape
 
-        topk_idx, topk_weight, aux_loss = self.gate(hidden_states)
+        topk_idx, topk_weight, aux_loss = self.gate(hidden_states, padding_mask)
 
         tokens = topk_idx.numel()
         capacity = math.ceil(
@@ -144,7 +164,6 @@ class MoE(nn.Module):
         if self.config.moe_config.drop_tokens:
             topk_idx = topk_idx.masked_fill(~mask, -1)
 
-        # 优化点：使用 reshape 避免 contiguous 报错
         hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
 
         if self.training:
