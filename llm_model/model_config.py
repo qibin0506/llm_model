@@ -79,7 +79,7 @@ class MoEConfig:
     z_loss_coef: float = 1e-4
     router_jitter_noise: float = 0.01
     capacity_factor: float = 1.25
-    drop_tokens: bool = True
+    drop_tokens: bool = False
 
 
 @dataclass(kw_only=True)
