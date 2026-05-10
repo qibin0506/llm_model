@@ -66,8 +66,14 @@ class MoEGate(nn.Module):
         ### expert-level computation auxiliary loss
         if self.training:
             if padding_mask is not None:
-                valid_mask_2d = padding_mask.to(dtype=torch.bool, device=hidden_states.device)
-                valid_mask_flat = valid_mask_2d.view(-1)
+                if padding_mask.shape[-1] > seq_len:
+                    current_padding_mask = padding_mask[..., -seq_len:]
+                else:
+                    current_padding_mask = padding_mask
+
+                valid_mask_2d = current_padding_mask.to(dtype=torch.bool, device=hidden_states.device).reshape(bsz, seq_len)
+
+                valid_mask_flat = valid_mask_2d.reshape(-1)
             else:
                 valid_mask_2d = torch.ones((bsz, seq_len), dtype=torch.bool, device=hidden_states.device)
                 valid_mask_flat = torch.ones(bsz * seq_len, dtype=torch.bool, device=hidden_states.device)
@@ -80,8 +86,8 @@ class MoEGate(nn.Module):
                 z_loss = torch.tensor(0.0, device=hidden_states.device, dtype=torch.float32)
 
             if self.seq_aux:
-                scores_for_seq_aux = scores.view(bsz, seq_len, -1)
-                topk_idx_for_aux_loss = topk_idx.view(bsz, seq_len, self.top_k)
+                scores_for_seq_aux = scores.reshape(bsz, seq_len, -1)
+                topk_idx_for_aux_loss = topk_idx.reshape(bsz, seq_len, self.top_k)
 
                 # (bsz, seq_len, n_experts)
                 mask_ce = F.one_hot(topk_idx_for_aux_loss, num_classes=self.n_routed_experts).sum(dim=2).float()
@@ -100,7 +106,7 @@ class MoEGate(nn.Module):
                 scores_valid = scores[valid_mask_flat]
 
                 if topk_idx_valid.numel() > 0:
-                    mask_ce = F.one_hot(topk_idx_valid.view(-1), num_classes=self.n_routed_experts)
+                    mask_ce = F.one_hot(topk_idx_valid.reshape(-1), num_classes=self.n_routed_experts)
                     ce = mask_ce.float().mean(0)
                     Pi = scores_valid.mean(0)
                     fi = ce * self.n_routed_experts
@@ -147,7 +153,7 @@ class MoE(nn.Module):
             self.config.moe_config.capacity_factor * tokens / self.experts_per_rank
         )
 
-        flat_expert = topk_idx.view(-1)
+        flat_expert = topk_idx.reshape(-1)
         valid_mask = flat_expert >= 0
 
         safe_expert = flat_expert.clamp(min=0)
@@ -156,7 +162,7 @@ class MoE(nn.Module):
 
         position_in_expert = torch.cumsum(one_hot, dim=0) - 1
         position_in_expert = position_in_expert.gather(1, safe_expert.unsqueeze(-1)).squeeze(-1)
-        mask = (position_in_expert < capacity).view(topk_idx.shape)
+        mask = (position_in_expert < capacity).reshape(topk_idx.shape)
 
         mask_f = mask.to(topk_weight.dtype)
         topk_weight = topk_weight * mask_f
@@ -198,7 +204,7 @@ class MoE(nn.Module):
         cnts.scatter_(1, topk_ids.clamp(min=0), valid_mask.to(cnts.dtype))
         tokens_per_expert = cnts.sum(dim=0)
 
-        flat_ids = topk_ids.view(-1)
+        flat_ids = topk_ids.reshape(-1)
         valid_mask = flat_ids >= 0
 
         safe_ids = flat_ids.clone()
@@ -228,7 +234,7 @@ class MoE(nn.Module):
             new_x[idxs[:valid_count]] = outs
 
         final_out = (
-            new_x.view(*topk_ids.shape, -1)
+            new_x.reshape(*topk_ids.shape, -1)
             .type(topk_weight.dtype)
             .mul_(topk_weight.unsqueeze(dim=-1))
             .sum(dim=1)
