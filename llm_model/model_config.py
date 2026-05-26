@@ -94,7 +94,7 @@ class Config:
             当未指定时，默认等同于 num_attention_heads。
         max_position_embeddings (`int`): 模型的最大位置嵌入长度，通常为当前上下文窗口大小。
         original_max_position_embeddings (`Optional[int]`, 默认 None): 预训练时的原始最大上下文长度。常被各种 RoPE 扩展算法（如 YaRN）用来计算精确的降频倍率。
-        attention_dropout (`float`, 默认 0.1): 注意力权重概率矩阵上的 Dropout 比例。
+        attention_dropout (`float`, 默认 0): 注意力权重概率矩阵上的 Dropout 比例。
         attention_implementation (`str`, 默认 'auto'): 注意力算子的实现方案。
             `auto`: 自动判断，若 PyTorch 环境支持则用 F.scaled_dot_product_attention (sdpa)，否则用纯手写实现。
             `sdpa`: 强制使用官方 SDPA（支持 FlashAttention/内存优化等引擎）。
@@ -114,7 +114,7 @@ class Config:
     num_key_value_heads: Optional[int] = None
     max_position_embeddings: int
     original_max_position_embeddings: Optional[int] = None
-    attention_dropout: float = 0.1
+    attention_dropout: float = 0.0
     attention_implementation: str = 'auto'
     initializer_range: float = 0.02
     use_qk_norm: bool = True
