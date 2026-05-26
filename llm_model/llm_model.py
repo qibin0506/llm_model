@@ -1,8 +1,6 @@
 from typing import Optional, Tuple, Dict
-from functools import partial
 import torch
 from torch import nn
-from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 from .model_config import Config
 from .attention_interface import get_attention_interface, supports_fused_causal_mask
@@ -334,15 +332,15 @@ class LlmModel(nn.Module):
             # This uses torch's original init
             module._reset_parameters()
 
-    def gradient_checkpointing_enable(self):
+    def gradient_checkpointing_enable(self, checkpoint_func = None):
         self.gradient_checkpointing = True
 
-        if self._checkpoint_func is None:
-            try:
-                import deepspeed
-                self._checkpoint_func = deepspeed.checkpointing.checkpoint
-            except ImportError:
-                self._checkpoint_func = partial(torch_checkpoint, use_reentrant=False)
+        if checkpoint_func is not None:
+            self._checkpoint_func = checkpoint_func
+        elif self._checkpoint_func is None:
+            from functools import partial
+            from torch.utils.checkpoint import checkpoint as torch_checkpoint
+            self._checkpoint_func = partial(torch_checkpoint, use_reentrant=False)
 
     def gradient_checkpointing_disable(self):
         self.gradient_checkpointing = False
