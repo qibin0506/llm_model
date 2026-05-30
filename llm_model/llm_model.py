@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Any
 import torch
 from torch import nn
 
@@ -222,8 +222,7 @@ class DecoderLayer(nn.Module):
                 and config.moe_config.intermediate_size
                 and config.moe_config.num_experts_per_tok
                 and config.moe_config.n_routed_experts
-                and config.moe_config.n_shared_experts
-                and layer_idx >= config.moe_config.n_dense_layer
+                and (config.moe_config.n_dense_layer is None or layer_idx >= config.moe_config.n_dense_layer)
         )
 
         if use_moe:
@@ -389,7 +388,7 @@ class LlmModel(nn.Module):
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
             **kwargs,
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
         Args:
             input_ids (`torch.Tensor`):

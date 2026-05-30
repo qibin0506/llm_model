@@ -65,6 +65,7 @@ def _compute_dynamic_ntk_parameters(
     seq_len = seq_len if seq_len is not None and seq_len > max_position_embeddings else max_position_embeddings
 
     # Compute the inverse frequencies
+    assert dim > 2, f"RoPE dim must be > 2, got {dim}"
     base = base * ((factor * seq_len / max_position_embeddings) - (factor - 1)) ** (dim / (dim - 2))
     inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
     return inv_freq, attention_factor

@@ -27,8 +27,7 @@ def _expand_mask(
 def _make_causal_mask(
         input_ids_shape: torch.Size,
         dtype: torch.dtype,
-        device:
-        torch.device,
+        device: torch.device,
         past_key_values_length: int = 0
 ):
     """
