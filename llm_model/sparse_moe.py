@@ -228,7 +228,7 @@ class MoE(nn.Module):
             start_idx = end_idx
 
         outs = torch.cat(outputs, dim=0) if len(outputs) else sorted_tokens.new_empty(0, sorted_tokens.shape[-1])
-        new_x = x.new_zeros(topk_ids.numel(), x.shape[-1])
+        new_x = x.new_zeros(topk_ids.numel(), x.shape[-1], dtype=outs.dtype)
         valid_count = outs.shape[0]
         if valid_count > 0:
             new_x[idxs[:valid_count]] = outs
