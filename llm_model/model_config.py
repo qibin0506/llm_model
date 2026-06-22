@@ -119,6 +119,10 @@ class Config:
     initializer_range: float = 0.02
     use_qk_norm: bool = True
     tie_word_embeddings: bool = False
+    attention_qkv_bias: bool = False
+    attention_out_bias: bool = False
+    mlp_bias: bool = False
+    lm_head_bias: bool = False
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
     attn_res_config: Optional[AttnResConfig] = None

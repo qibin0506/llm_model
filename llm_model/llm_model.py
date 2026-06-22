@@ -55,9 +55,9 @@ class MLP(nn.Module):
         super().__init__()
         config_intermediate_size = intermediate_size if intermediate_size else config.intermediate_size
 
-        self.gate_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
-        self.up_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=False)
-        self.down_proj = nn.Linear(config_intermediate_size, config.hidden_size, bias=False)
+        self.gate_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=config.mlp_bias)
+        self.up_proj = nn.Linear(config.hidden_size, config_intermediate_size, bias=config.mlp_bias)
+        self.down_proj = nn.Linear(config_intermediate_size, config.hidden_size, bias=config.mlp_bias)
         self.activation = nn.SiLU()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -138,10 +138,10 @@ class Attention(nn.Module):
         self.scale = self.head_size ** -0.5
         self.drop_rate = config.attention_dropout
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_size, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=False)
-        self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=False)
+        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_size, bias=config.attention_qkv_bias)
+        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=config.attention_qkv_bias)
+        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=config.attention_qkv_bias)
+        self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=config.attention_out_bias)
         self.attention_interface = get_attention_interface(config)
 
         if self.use_qk_norm:
@@ -309,7 +309,7 @@ class LlmModel(nn.Module):
             [DecoderLayer(config, idx) for idx in range(config.num_hidden_layers)])
 
         self.head_norm = RMSNorm(config.hidden_size)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=config.lm_head_bias)
 
         self.apply(self._init_weights)
 
