@@ -24,7 +24,12 @@ def _compute_default_rope_parameters(
     """
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
-    head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+
+    if config.head_dim is not None:
+        head_dim = config.head_dim
+    else:
+        head_dim = config.hidden_size // config.num_attention_heads
+
     dim = int(head_dim * partial_rotary_factor)
 
     attention_factor = 1.0  # Unused in this type of RoPE
@@ -54,7 +59,12 @@ def _compute_dynamic_ntk_parameters(
     """
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
-    head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+
+    if config.head_dim is not None:
+        head_dim = config.head_dim
+    else:
+        head_dim = config.hidden_size // config.num_attention_heads
+
     dim = int(head_dim * partial_rotary_factor)
     max_position_embeddings = config.max_position_embeddings
     factor = config.rope_config.factor
@@ -92,7 +102,12 @@ def _compute_yarn_parameters(
     """
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
-    head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+
+    if config.head_dim is not None:
+        head_dim = config.head_dim
+    else:
+        head_dim = config.hidden_size // config.num_attention_heads
+
     dim = int(head_dim * partial_rotary_factor)
     factor = config.rope_config.factor
     attention_factor = config.rope_config.attention_factor

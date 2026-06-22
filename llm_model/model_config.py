@@ -92,6 +92,7 @@ class Config:
             若等于 1 则是 MQA (Multi-Query Attention)；
             若大于 1 且小于 num_attention_heads 则是 GQA (Grouped-Query Attention)。
             当未指定时，默认等同于 num_attention_heads。
+        head_dim (`Optional[int]`, 默认 None): 配置head_dim默认为hidden_size // num_heads
         max_position_embeddings (`int`): 模型的最大位置嵌入长度，通常为当前上下文窗口大小。
         original_max_position_embeddings (`Optional[int]`, 默认 None): 预训练时的原始最大上下文长度。常被各种 RoPE 扩展算法（如 YaRN）用来计算精确的降频倍率。
         attention_dropout (`float`, 默认 0): 注意力权重概率矩阵上的 Dropout 比例。
@@ -102,6 +103,10 @@ class Config:
         initializer_range (`float`, 默认 0.02): 权重初始化的正态分布标准差参数。
         use_qk_norm (`bool`, 默认 True): 是否在计算注意力权重之前对 Query 和 Key 执行一层 RMSNorm，通常可提升训练稳定性。
         tie_word_embeddings (`bool`, 默认 False): 是否将输入 Token Embedding 矩阵与输出层 LM Head 权重矩阵进行绑定（权重共享）。
+        attention_qkv_bias(`bool`, 默认 False): 是否开启attention Q、K、V的bias
+        attention_out_bias(`bool`, 默认 False): 是否开启attention output的bias
+        mlp_bias(`bool`, 默认 False): 是否开启mlp的bias
+        lm_head_bias(`bool`, 默认 False): 是否开启lm_head的bias
         rope_config (`RoPEConfig`): 旋转位置编码详细配置实例。
         moe_config (`Optional[MoEConfig]`, 默认 None): MoE 的详细配置，不传入时默认这是一个 Dense 稠密模型。
         attn_res_config (`Optional[AttnResConfig]`, 默认 None): 块残差注意力的细粒度控制配置。
@@ -112,6 +117,7 @@ class Config:
     num_hidden_layers: int
     num_attention_heads: int
     num_key_value_heads: Optional[int] = None
+    head_dim: Optional[int] = None
     max_position_embeddings: int
     original_max_position_embeddings: Optional[int] = None
     attention_dropout: float = 0.0

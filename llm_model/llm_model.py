@@ -132,7 +132,12 @@ class Attention(nn.Module):
 
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
-        self.head_size = self.hidden_size // self.num_heads
+
+        if config.head_dim is not None:
+            self.head_size = config.head_dim
+        else:
+            self.head_size = self.hidden_size // self.num_heads
+
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.scale = self.head_size ** -0.5
