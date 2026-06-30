@@ -11,10 +11,10 @@ from .sparse_moe import MoE
 
 
 class BlockAttnRes(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, config: Config):
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(hidden_size))
-        self.norm = RMSNorm(hidden_size)
+        self.weight = nn.Parameter(torch.zeros(config.hidden_size))
+        self.norm = RMSNorm(config.hidden_size, config.norm_eps)
 
     def forward(self, blocks: list[torch.Tensor], partial_block: torch.Tensor):
         # [N+1, B, T, D]
@@ -34,7 +34,7 @@ class BlockAttnRes(nn.Module):
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps = 1e-6):
+    def __init__(self, hidden_size, eps):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -150,8 +150,8 @@ class Attention(nn.Module):
         self.attention_interface = get_attention_interface(config)
 
         if self.use_qk_norm:
-            self.q_norm = RMSNorm(self.head_size)
-            self.k_norm = RMSNorm(self.head_size)
+            self.q_norm = RMSNorm(self.head_size, config.norm_eps)
+            self.k_norm = RMSNorm(self.head_size, config.norm_eps)
 
     def forward(
             self,
@@ -218,9 +218,9 @@ class DecoderLayer(nn.Module):
         super().__init__()
         self.layer_idx = layer_idx
 
-        self.attn_norm = RMSNorm(config.hidden_size)
+        self.attn_norm = RMSNorm(config.hidden_size, config.norm_eps)
         self.attn = Attention(config, layer_idx)
-        self.mlp_norm = RMSNorm(config.hidden_size)
+        self.mlp_norm = RMSNorm(config.hidden_size, config.norm_eps)
 
         use_moe = (
                 config.moe_config
@@ -239,8 +239,8 @@ class DecoderLayer(nn.Module):
         if self.attn_res_config is not None:
             # block_size = num_hidden_layers / attn_res_num_blocks
             self.layers_per_block = config.num_hidden_layers // self.attn_res_config.num_blocks
-            self.attn_res_agg = BlockAttnRes(config.hidden_size)
-            self.mlp_res_agg = BlockAttnRes(config.hidden_size)
+            self.attn_res_agg = BlockAttnRes(config)
+            self.mlp_res_agg = BlockAttnRes(config)
 
     def forward(
             self,
@@ -313,7 +313,7 @@ class LlmModel(nn.Module):
         self.layers = nn.ModuleList(
             [DecoderLayer(config, idx) for idx in range(config.num_hidden_layers)])
 
-        self.head_norm = RMSNorm(config.hidden_size)
+        self.head_norm = RMSNorm(config.hidden_size, config.norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=config.lm_head_bias)
 
         self.apply(self._init_weights)

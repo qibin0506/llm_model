@@ -102,6 +102,7 @@ class Config:
             `default`: 强制使用简单的矩阵相乘及 Softmax 原生实现。
         initializer_range (`float`, 默认 0.02): 权重初始化的正态分布标准差参数。
         use_qk_norm (`bool`, 默认 True): 是否在计算注意力权重之前对 Query 和 Key 执行一层 RMSNorm，通常可提升训练稳定性。
+        norm_eps (`int`, 默认 1e-6): RMSNorm eps配置。
         tie_word_embeddings (`bool`, 默认 False): 是否将输入 Token Embedding 矩阵与输出层 LM Head 权重矩阵进行绑定（权重共享）。
         attention_qkv_bias(`bool`, 默认 False): 是否开启attention Q、K、V的bias
         attention_out_bias(`bool`, 默认 False): 是否开启attention output的bias
@@ -124,6 +125,7 @@ class Config:
     attention_implementation: str = 'auto'
     initializer_range: float = 0.02
     use_qk_norm: bool = True
+    norm_eps: int = 1e-6
     tie_word_embeddings: bool = False
     attention_qkv_bias: bool = False
     attention_out_bias: bool = False
