@@ -4,6 +4,21 @@ import torch
 
 
 @dataclass(kw_only=True)
+class GatedDeltaNetConfig:
+    """
+    Gated DeltaNet 线性注意力核心配置。
+
+    Args:
+        use_short_conv (`bool`, 默认 True): 是否在特征投影（Q, K, V）之后应用 1D 短卷积 (Short Convolution / 因果卷积)。这是类似 Mamba / GLA 等线性模型中，用来弥补线性注意力局部时序感知能力不足的关键组件。
+        conv_kernel_size (`int`, 默认 4): 1D 短卷积的核大小 (Kernel Size)。决定了单个 Token 在卷积层能“看”到前面多少个历史 Token 的特征。
+        conv_bias (`bool`, 默认 False): 1D 短卷积是否启用偏置项 (Bias)。
+    """
+    use_short_conv: bool = True
+    conv_kernel_size: int = 4
+    conv_bias: bool = False
+
+
+@dataclass(kw_only=True)
 class RoPEConfig:
     """
     RoPE (Rotary Position Embedding) 配置，用于定义旋转位置编码的类型及相关的缩放参数。
@@ -110,7 +125,15 @@ class Config:
         lm_head_bias(`bool`, 默认 False): 是否开启lm_head的bias
         rope_config (`RoPEConfig`): 旋转位置编码详细配置实例。
         moe_config (`Optional[MoEConfig]`, 默认 None): MoE 的详细配置，不传入时默认这是一个 Dense 稠密模型。
-        attn_res_config (`Optional[AttnResConfig]`, 默认 None): 块残差注意力的细粒度控制配置。
+        attn_res_config (`str`, 默认 softmax): 残差注意力的细粒度控制配置。
+        attention_type (`Optional[AttnResConfig]`, 默认 softmax): 注意力模式: 'softmax', 'gated_deltanet', 'hybrid'
+        gated_deltanet_implementation (`str`, 默认 auto): Gated DeltaNet 算子实现: 'auto', 'fla', 'default'
+        hybrid_ratio (`str`, 默认 3:1): 混合架构比例，支持配置Gated DeltaNet层数:Softmax Attention层数
+        gated_deltanet_config (Optional[GatedDeltaNetConfig]`): Gated DeltaNet配置
+        hybrid_softmax_head_dim (`Optional[int]`, 默认 None): 混合架构下，Softmax 注意力层的独立 Head 维度。如不指定，默认使用全局 head_dim。
+        hybrid_softmax_num_heads (`Optional[int]`, 默认 None): 混合架构下，Softmax 注意力层的独立 Query 头数。
+        hybrid_softmax_num_kv_heads (`Optional[int]`, 默认 None): 混合架构下，Softmax 注意力层的独立 KV 头数。
+        hybrid_softmax_gated (`bool`, 默认 False): 混合架构下，Softmax 注意力层是否启用输出门控 (Gated Attention)。开启后 q_proj 输出维度翻倍产生 Gate，以 Sigmoid 门控拦截注意力输出。
     """
     vocab_size: int
     hidden_size: int
@@ -134,6 +157,14 @@ class Config:
     rope_config: RoPEConfig = field(default_factory=RoPEConfig)
     moe_config: Optional[MoEConfig] = None
     attn_res_config: Optional[AttnResConfig] = None
+    attention_type: str = 'softmax'
+    gated_deltanet_implementation: str = 'auto'
+    hybrid_ratio: str = "3:1"
+    gated_deltanet_config: Optional[GatedDeltaNetConfig] = field(default_factory=GatedDeltaNetConfig)
+    hybrid_softmax_head_dim: Optional[int] = None
+    hybrid_softmax_num_heads: Optional[int] = None
+    hybrid_softmax_num_kv_heads: Optional[int] = None
+    hybrid_softmax_gated: bool = False
 
     def __post_init__(self):
         if self.num_key_value_heads is None:

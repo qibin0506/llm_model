@@ -10,5 +10,6 @@ ModelConfig = model_config.Config
 RoPEConfig = model_config.RoPEConfig
 MoEConfig = model_config.MoEConfig
 AttnResConfig = model_config.AttnResConfig
+GatedDeltaNetConfig = model_config.GatedDeltaNetConfig
 VLMConfig = model_config.VLMConfig
 KVCache = kv_cache.KVCache

@@ -5,9 +5,35 @@ from torch import nn
 from .model_config import Config
 from .attention_interface import get_attention_interface, supports_fused_causal_mask
 from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
+from .norm import RMSNorm
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
+from .gated_deltanet import GatedDeltaNet
+
+
+def _parse_hybrid_ratio(ratio: str) -> Tuple[int, int]:
+    parts = ratio.split(':')
+    if len(parts) == 2:
+        return int(parts[0]), int(parts[1])
+    raise ValueError("hybrid_ratio must be set to x:y")
+
+
+def _resolve_layer_attn_type(config: Config, layer_idx: int) -> str:
+    if config.attention_type != 'hybrid':
+        return config.attention_type
+
+    gd_count, sa_count = _parse_hybrid_ratio(config.hybrid_ratio)
+    cycle_len = gd_count + sa_count
+
+    if cycle_len <= 0:
+        return 'softmax'
+
+    pos_in_cycle = layer_idx % cycle_len
+    if pos_in_cycle < gd_count:
+        return 'gated_deltanet'
+    else:
+        return 'softmax'
 
 
 class BlockAttnRes(nn.Module):
@@ -31,23 +57,6 @@ class BlockAttnRes(nn.Module):
         # [B, T, D]
         h = torch.einsum('n b t, n b t d -> b t d', scores, V)
         return h
-
-
-class RMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.square().mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-
-    def extra_repr(self):
-        return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
 class MLP(nn.Module):
@@ -125,25 +134,33 @@ class RotaryEmbedding(nn.Module):
 class Attention(nn.Module):
     def __init__(self, config: Config, layer_idx: int):
         super().__init__()
-        assert config.num_attention_heads % config.num_key_value_heads == 0
 
         self.use_qk_norm = config.use_qk_norm
         self.layer_idx = layer_idx
-
         self.hidden_size = config.hidden_size
-        self.num_heads = config.num_attention_heads
+        is_hybrid_softmax = (config.attention_type == 'hybrid' and _resolve_layer_attn_type(config, layer_idx) == 'softmax')
 
-        if config.head_dim is not None:
-            self.head_size = config.head_dim
+        if is_hybrid_softmax and config.hybrid_softmax_head_dim is not None:
+            self.num_heads = config.hybrid_softmax_num_heads or config.num_attention_heads
+            self.num_key_value_heads = config.hybrid_softmax_num_kv_heads or config.num_key_value_heads
+            self.head_size = config.hybrid_softmax_head_dim
+            self.is_gated = config.hybrid_softmax_gated
         else:
-            self.head_size = self.hidden_size // self.num_heads
+            self.num_heads = config.num_attention_heads
+            self.num_key_value_heads = config.num_key_value_heads if config.num_key_value_heads is not None else config.num_attention_heads
+            self.head_size = config.head_dim if config.head_dim is not None else (config.hidden_size // self.num_heads)
+            self.is_gated = False
 
-        self.num_key_value_heads = config.num_key_value_heads
+        assert self.num_heads % self.num_key_value_heads == 0
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.scale = self.head_size ** -0.5
         self.drop_rate = config.attention_dropout
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_size, bias=config.attention_qkv_bias)
+        q_proj_out = self.num_heads * self.head_size
+        if self.is_gated:
+            q_proj_out *= 2
+
+        self.q_proj = nn.Linear(self.hidden_size, q_proj_out, bias=config.attention_qkv_bias)
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=config.attention_qkv_bias)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_size, bias=config.attention_qkv_bias)
         self.o_proj = nn.Linear(self.num_heads * self.head_size, self.hidden_size, bias=config.attention_out_bias)
@@ -163,7 +180,17 @@ class Attention(nn.Module):
         batch, seq_len, _ = hidden_states.shape
 
         # (batch, seq_len, num_heads*head_size)
-        query_states = self.q_proj(hidden_states)
+        q_out = self.q_proj(hidden_states)
+        if self.is_gated:
+            q_out = q_out.view(batch, seq_len, self.num_heads, self.head_size * 2)
+            query_states, gate = q_out.chunk(2, dim=-1)
+
+            query_states = query_states.reshape(batch, seq_len, -1, self.head_size)
+            gate = gate.reshape(batch, seq_len, -1)
+        else:
+            query_states = q_out.reshape(batch, seq_len, -1, self.head_size)
+            gate = None
+
         # (batch, seq_len, num_key_value_heads*head_size)
         key_states = self.k_proj(hidden_states)
         # (batch, seq_len, num_key_value_heads*head_size)
@@ -208,6 +235,9 @@ class Attention(nn.Module):
 
         # (batch, seq_len, num_heads*head_size)
         attn = attn.reshape(batch, seq_len, -1)
+        if gate is not None:
+            attn = attn * torch.sigmoid(gate)
+
         # (batch, seq_len, hidden_size)
         out = self.o_proj(attn)
         return out
@@ -217,9 +247,13 @@ class DecoderLayer(nn.Module):
     def __init__(self, config: Config, layer_idx: int):
         super().__init__()
         self.layer_idx = layer_idx
-
         self.attn_norm = RMSNorm(config.hidden_size, config.norm_eps)
-        self.attn = Attention(config, layer_idx)
+
+        if _resolve_layer_attn_type(config, layer_idx) == 'gated_deltanet':
+            self.attn = GatedDeltaNet(config, layer_idx)
+        else:
+            self.attn = Attention(config, layer_idx)
+
         self.mlp_norm = RMSNorm(config.hidden_size, config.norm_eps)
 
         use_moe = (
@@ -251,6 +285,27 @@ class DecoderLayer(nn.Module):
             past_key_values: Optional[KVCache] = None,
             blocks: Optional[list[torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[list[torch.Tensor]]]:
+        def forward_attn(normed_x):
+            if isinstance(self.attn, GatedDeltaNet):
+                state_cache = past_key_values.get_recurrent_state(
+                    self.layer_idx) if past_key_values is not None else None
+                out, new_state_cache = self.attn(
+                    hidden_states=normed_x,
+                    padding_mask=padding_mask,
+                    state_cache=state_cache,
+                    use_cache=(past_key_values is not None)
+                )
+                if past_key_values is not None and new_state_cache is not None:
+                    past_key_values.update_recurrent_state(self.layer_idx, new_state_cache)
+                return out
+            else:
+                return self.attn(
+                    hidden_states=normed_x,
+                    position_embeddings=position_embeddings,
+                    attention_mask=attention_mask,
+                    past_key_values=past_key_values
+                )
+
         if self.attn_res_config is not None:
             # Block Attention Residuals
             partial_block = hidden_states
@@ -259,12 +314,7 @@ class DecoderLayer(nn.Module):
                 blocks.append(partial_block)
                 partial_block = None
 
-            attn_out = self.attn(
-                hidden_states=self.attn_norm(h),
-                position_embeddings=position_embeddings,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values
-            )
+            attn_out = forward_attn(self.attn_norm(h))
             partial_block = partial_block + attn_out if partial_block is not None else attn_out
 
             h = self.mlp_res_agg(blocks, partial_block)
@@ -279,13 +329,8 @@ class DecoderLayer(nn.Module):
 
         # standard residual
         residual = hidden_states
-        hidden_states = self.attn(
-            hidden_states=self.attn_norm(hidden_states),
-            position_embeddings=position_embeddings,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values
-        )
-        hidden_states = hidden_states + residual
+        attn_out = forward_attn(self.attn_norm(hidden_states))
+        hidden_states = residual + attn_out
 
         if isinstance(self.mlp, MoE):
             mlp_states, aux_loss = self.mlp(self.mlp_norm(hidden_states), padding_mask)
@@ -451,12 +496,14 @@ class LlmModel(nn.Module):
 
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
-        fused_causal_mask = False
-        if supports_fused_causal_mask(self.config) and seq_len > 1 and past_seen_tokens == 0:
-            if attention_mask is None:
-                fused_causal_mask = True
+        can_skip_causal_matrix = False
+        if attention_mask is None and seq_len > 1 and past_seen_tokens == 0:
+            if self.config.attention_type == 'gated_deltanet':
+                can_skip_causal_matrix = True
+            elif supports_fused_causal_mask(self.config):
+                can_skip_causal_matrix = True
 
-        if fused_causal_mask:
+        if can_skip_causal_matrix:
             causal_mask = None
         else:
             # (bsz, 1, seq_len, full_seq_len)
@@ -518,6 +565,9 @@ class LlmModel(nn.Module):
         hidden_states = self.head_norm(hidden_states)
         # (batch, seq_len, vocab_size)
         head = self.lm_head(hidden_states)
+
+        if past_key_values is not None:
+            past_key_values.seen_tokens = full_seq_len
 
         return {
             'logits': head,
