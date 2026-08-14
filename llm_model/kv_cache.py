@@ -100,8 +100,25 @@ class KVCache:
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
-    def get_recurrent_state(self, layer_idx: int) -> Optional[Dict[str, Any]]:
-        return self.recurrent_cache.get(layer_idx, None)
+    def get_recurrent_state(self, layer_idx: int, current_batch: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        state_dict = self.recurrent_cache.get(layer_idx, None)
+        if state_dict is None or current_batch is None:
+            return state_dict
+
+        first_tensor = next((v for v in state_dict.values() if isinstance(v, torch.Tensor)), None)
+        if first_tensor is not None and first_tensor.shape[0] < current_batch:
+            if current_batch % first_tensor.shape[0] == 0:
+                repeat_factor = current_batch // first_tensor.shape[0]
+                expanded_dict = {}
+                for k, v in state_dict.items():
+                    if isinstance(v, torch.Tensor) and v.shape[0] < current_batch:
+                        expanded_dict[k] = v.repeat_interleave(repeat_factor, dim=0)
+                    else:
+                        expanded_dict[k] = v
+                self.recurrent_cache[layer_idx] = expanded_dict
+                return expanded_dict
+
+        return state_dict
 
     def update_recurrent_state(self, layer_idx: int, state_dict: Dict[str, Any]):
         self.recurrent_cache[layer_idx] = state_dict

@@ -288,7 +288,10 @@ class DecoderLayer(nn.Module):
         def forward_attn(normed_x):
             if isinstance(self.attn, GatedDeltaNet):
                 state_cache = past_key_values.get_recurrent_state(
-                    self.layer_idx) if past_key_values is not None else None
+                    self.layer_idx,
+                    current_batch=normed_x.shape[0]
+                ) if past_key_values is not None else None
+
                 out, new_state_cache = self.attn(
                     hidden_states=normed_x,
                     padding_mask=padding_mask,

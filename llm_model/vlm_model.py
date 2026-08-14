@@ -22,7 +22,7 @@ class MultiModalProjector(nn.Module):
             nn.Linear(config.vision_hidden_size, config.hidden_size, bias=False),
             nn.GELU(),
             nn.Linear(config.hidden_size, config.hidden_size, bias=False),
-            RMSNorm(config.hidden_size)
+            RMSNorm(config.hidden_size, config.norm_eps)
         )
 
     def forward(self, vision_outputs: torch.Tensor):
