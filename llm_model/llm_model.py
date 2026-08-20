@@ -440,6 +440,7 @@ class LlmModel(nn.Module):
             position_ids: Optional[torch.Tensor] = None,
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
+            return_logits: bool = True,
             **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -455,6 +456,8 @@ class LlmModel(nn.Module):
                 inference key value cache, when use_cache == True, will return KVCache on first forward
             use_cache (`bool`, default is False)
                 use KVCache or not
+            return_logits (`bool`, default is True):
+                return logits if needed
 
         Returns:
             logits
@@ -566,8 +569,12 @@ class LlmModel(nn.Module):
 
         # (batch, seq_len, hidden_size)
         hidden_states = self.head_norm(hidden_states)
-        # (batch, seq_len, vocab_size)
-        head = self.lm_head(hidden_states)
+
+        if return_logits:
+            # (batch, seq_len, vocab_size)
+            head = self.lm_head(hidden_states)
+        else:
+            head = None
 
         if past_key_values is not None:
             past_key_values.seen_tokens = full_seq_len
