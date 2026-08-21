@@ -125,8 +125,8 @@ class Config:
         lm_head_bias(`bool`, 默认 False): 是否开启lm_head的bias
         rope_config (`RoPEConfig`): 旋转位置编码详细配置实例。
         moe_config (`Optional[MoEConfig]`, 默认 None): MoE 的详细配置，不传入时默认这是一个 Dense 稠密模型。
-        attn_res_config (`str`, 默认 softmax): 残差注意力的细粒度控制配置。
-        attention_type (`Optional[AttnResConfig]`, 默认 softmax): 注意力模式: 'softmax', 'gated_deltanet', 'hybrid'
+        attn_res_config (`Optional[AttnResConfig]`, 默认 None): 残差注意力的细粒度控制配置。
+        attention_type (`str`, 默认 softmax): 注意力模式: 'softmax', 'gated_deltanet', 'hybrid'
         gated_deltanet_implementation (`str`, 默认 auto): Gated DeltaNet 算子实现: 'auto', 'fla', 'default'
         hybrid_ratio (`str`, 默认 3:1): 混合架构比例，支持配置Gated DeltaNet层数:Softmax Attention层数
         gated_deltanet_config (Optional[GatedDeltaNetConfig]`): Gated DeltaNet配置
@@ -148,7 +148,7 @@ class Config:
     attention_implementation: str = 'auto'
     initializer_range: float = 0.02
     use_qk_norm: bool = True
-    norm_eps: int = 1e-6
+    norm_eps: float = 1e-6
     tie_word_embeddings: bool = False
     attention_qkv_bias: bool = False
     attention_out_bias: bool = False
