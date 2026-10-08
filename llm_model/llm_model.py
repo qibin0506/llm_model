@@ -349,7 +349,7 @@ class LlmModel(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
-        self.gradient_checkpointing = False
+        self.is_gradient_checkpointing = False
         self._checkpoint_func = None
 
         if config.attn_res_config is not None:
@@ -385,7 +385,7 @@ class LlmModel(nn.Module):
             module._reset_parameters()
 
     def gradient_checkpointing_enable(self, checkpoint_func = None):
-        self.gradient_checkpointing = True
+        self.is_gradient_checkpointing = True
 
         if checkpoint_func is not None:
             self._checkpoint_func = checkpoint_func
@@ -395,7 +395,7 @@ class LlmModel(nn.Module):
             self._checkpoint_func = partial(torch_checkpoint, use_reentrant=False)
 
     def gradient_checkpointing_disable(self):
-        self.gradient_checkpointing = False
+        self.is_gradient_checkpointing = False
 
     def _create_custom_forward(self, module):
         def custom_forward(*inputs):
@@ -441,6 +441,7 @@ class LlmModel(nn.Module):
             past_key_values: Optional[KVCache] = None,
             use_cache: bool = False,
             return_logits: bool = True,
+            logits_to_keep: Optional[int] = None,
             **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -469,7 +470,7 @@ class LlmModel(nn.Module):
         """
         batch_size, seq_len = input_ids.shape
 
-        if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+        if self.is_gradient_checkpointing and self.training and torch.is_grad_enabled():
             use_cache = False
 
         if use_cache and past_key_values is None:
@@ -526,7 +527,7 @@ class LlmModel(nn.Module):
         blocks = [] if self.config.attn_res_config is not None else None
 
         for layer in self.layers:
-            if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+            if self.is_gradient_checkpointing and self.training and torch.is_grad_enabled():
                 cos, sin = position_embeddings
                 custom_forward = self._create_custom_forward(layer)
                 if blocks is not None:
@@ -571,8 +572,11 @@ class LlmModel(nn.Module):
         hidden_states = self.head_norm(hidden_states)
 
         if return_logits:
-            # (batch, seq_len, vocab_size)
-            head = self.lm_head(hidden_states)
+            if logits_to_keep is not None and logits_to_keep > 0:
+                head = self.lm_head(hidden_states[:, -logits_to_keep:])
+            else:
+                # (batch, seq_len, vocab_size)
+                head = self.lm_head(hidden_states)
         else:
             head = None
 
