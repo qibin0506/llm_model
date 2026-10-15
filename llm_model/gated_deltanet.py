@@ -133,8 +133,8 @@ class GatedDeltaNet(nn.Module):
 
             g_decay = g_decay * mask_hd
 
-        q = F.normalize(q, p=2, dim=-1)
-        k = F.normalize(k, p=2, dim=-1)
+        q = F.normalize(q.float(), p=2, dim=-1, eps=1e-6).to(q.dtype)
+        k = F.normalize(k.float(), p=2, dim=-1, eps=1e-6).to(k.dtype)
 
         q = q * (self.head_dim ** -0.5)
 

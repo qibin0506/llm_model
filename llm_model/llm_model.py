@@ -90,7 +90,7 @@ class RotaryEmbedding(nn.Module):
 
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
-        self.original_inv_freq = self.inv_freq
+        self.register_buffer("original_inv_freq", inv_freq.clone(), persistent=False)
 
     def _dynamic_frequency_update(self, position_ids, device):
         """
@@ -504,10 +504,11 @@ class LlmModel(nn.Module):
         position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
 
         can_skip_causal_matrix = False
-        if attention_mask is None and seq_len > 1 and past_seen_tokens == 0:
-            if self.config.attention_type == 'gated_deltanet':
-                can_skip_causal_matrix = True
-            elif supports_fused_causal_mask(self.config):
+        if self.config.attention_type == 'gated_deltanet':
+            can_skip_causal_matrix = True
+        elif seq_len > 1 and past_seen_tokens == 0 and supports_fused_causal_mask(self.config):
+            if attention_mask is None or bool(attention_mask.all()):
+                # 无 Padding 时直接走 SDPA is_causal=True (启用 FlashAttention-2)，省去 [B, 1, S, S] 显存
                 can_skip_causal_matrix = True
 
         if can_skip_causal_matrix:

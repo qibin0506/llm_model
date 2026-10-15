@@ -44,8 +44,9 @@ class MoEGate(nn.Module):
             hidden_states.to(torch.float32), self.weight.to(torch.float32), None
         )
 
+        is_grad_training = self.training and torch.is_grad_enabled()
         clean_logits = logits
-        if self.training and self.config.moe_config.router_jitter_noise > 0:
+        if is_grad_training and self.config.moe_config.router_jitter_noise > 0:
             noise = (torch.rand_like(logits) - 0.5) * 2.0 * self.config.moe_config.router_jitter_noise
             logits = logits + noise
 
@@ -64,7 +65,7 @@ class MoEGate(nn.Module):
             topk_weight = topk_weight * self.routed_scaling_factor
 
         ### expert-level computation auxiliary loss
-        if self.training:
+        if is_grad_training:
             if padding_mask is not None:
                 if padding_mask.shape[-1] > seq_len:
                     current_padding_mask = padding_mask[..., -seq_len:]
@@ -148,31 +149,29 @@ class MoE(nn.Module):
 
         topk_idx, topk_weight, aux_loss = self.gate(hidden_states, padding_mask)
 
-        tokens = topk_idx.numel()
-        capacity = math.ceil(
-            self.config.moe_config.capacity_factor * tokens / self.experts_per_rank
-        )
-
-        flat_expert = topk_idx.reshape(-1)
-        valid_mask = flat_expert >= 0
-
-        safe_expert = flat_expert.clamp(min=0)
-        one_hot = F.one_hot(safe_expert, num_classes=self.experts_per_rank).to(torch.int32)
-        one_hot[~valid_mask] = 0
-
-        position_in_expert = torch.cumsum(one_hot, dim=0) - 1
-        position_in_expert = position_in_expert.gather(1, safe_expert.unsqueeze(-1)).squeeze(-1)
-        mask = (position_in_expert < capacity).reshape(topk_idx.shape)
-
-        mask_f = mask.to(topk_weight.dtype)
-        topk_weight = topk_weight * mask_f
-
         if self.config.moe_config.drop_tokens:
+            tokens = topk_idx.numel()
+            capacity = math.ceil(
+                self.config.moe_config.capacity_factor * tokens / self.experts_per_rank
+            )
+
+            flat_expert = topk_idx.reshape(-1)
+            valid_mask = flat_expert >= 0
+
+            safe_expert = flat_expert.clamp(min=0)
+            one_hot = F.one_hot(safe_expert, num_classes=self.experts_per_rank).to(torch.int32)
+            one_hot[~valid_mask] = 0
+
+            position_in_expert = torch.cumsum(one_hot, dim=0) - 1
+            position_in_expert = position_in_expert.gather(1, safe_expert.unsqueeze(-1)).squeeze(-1)
+            mask = (position_in_expert < capacity).reshape(topk_idx.shape)
+
+            topk_weight = topk_weight * mask.to(topk_weight.dtype)
             topk_idx = topk_idx.masked_fill(~mask, -1)
 
         hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
 
-        if self.training:
+        if self.training and torch.is_grad_enabled():
             y = torch.zeros( hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
 
             for i, expert in enumerate(self.experts):
