@@ -4,12 +4,12 @@ from torch import nn
 
 from .model_config import Config
 from .attention_interface import get_attention_interface, supports_fused_causal_mask
-from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb
+from .rope import ROPE_INIT_FUNCTIONS, apply_rotary_pos_emb, _resolve_softmax_attn_dims
 from .norm import RMSNorm
 from .kv_cache import KVCache
 from .attention_masks import prepare_decoder_attention_mask
 from .sparse_moe import MoE
-from .gated_deltanet import GatedDeltaNet
+from .gated_deltanet import GatedDeltaNet, ShortConvolution
 
 
 def _parse_hybrid_ratio(ratio: str) -> Tuple[int, int]:
@@ -140,16 +140,10 @@ class Attention(nn.Module):
         self.hidden_size = config.hidden_size
         is_hybrid_softmax = (config.attention_type == 'hybrid' and _resolve_layer_attn_type(config, layer_idx) == 'softmax')
 
-        if is_hybrid_softmax and config.hybrid_softmax_head_dim is not None:
-            self.num_heads = config.hybrid_softmax_num_heads or config.num_attention_heads
-            self.num_key_value_heads = config.hybrid_softmax_num_kv_heads or config.num_key_value_heads
-            self.head_size = config.hybrid_softmax_head_dim
-            self.is_gated = config.hybrid_softmax_gated
-        else:
-            self.num_heads = config.num_attention_heads
-            self.num_key_value_heads = config.num_key_value_heads if config.num_key_value_heads is not None else config.num_attention_heads
-            self.head_size = config.head_dim if config.head_dim is not None else (config.hidden_size // self.num_heads)
-            self.is_gated = False
+        # 与 RoPE 共用同一套解析逻辑，混合架构下各 hybrid_softmax_* 字段独立生效
+        self.num_heads, self.num_key_value_heads, self.head_size, self.is_gated = _resolve_softmax_attn_dims(
+            config, is_hybrid_softmax
+        )
 
         assert self.num_heads % self.num_key_value_heads == 0
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
@@ -383,6 +377,14 @@ class LlmModel(nn.Module):
         elif isinstance(module, nn.MultiheadAttention):
             # This uses torch's original init
             module._reset_parameters()
+        elif isinstance(module, GatedDeltaNet):
+            nn.init.ones_(module.dt_bias)
+            with torch.no_grad():
+                module.A_log.copy_(
+                    torch.empty(module.num_heads, device=module.A_log.device).uniform_(0.01, 16).log_()
+                )
+        elif isinstance(module, ShortConvolution):
+            module._smooth_initialization()
 
     def gradient_checkpointing_enable(self, checkpoint_func = None):
         self.is_gradient_checkpointing = True

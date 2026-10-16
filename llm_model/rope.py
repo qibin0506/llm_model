@@ -4,14 +4,24 @@ from typing import Optional, Tuple
 from .model_config import Config
 
 
-def _resolve_rope_head_dim(config: Config) -> int:
-    if config.attention_type == 'hybrid' and config.hybrid_softmax_head_dim is not None:
-        return config.hybrid_softmax_head_dim
-    if config.head_dim is not None:
-        return config.head_dim
-    if config.attention_type == 'hybrid' and config.hybrid_softmax_num_heads is not None:
-        return config.hidden_size // config.hybrid_softmax_num_heads
-    return config.hidden_size // config.num_attention_heads
+def _resolve_softmax_attn_dims(config: Config, is_hybrid_softmax: bool) -> Tuple[int, int, int, bool]:
+    """
+    解析 Softmax 注意力层的 (num_heads, num_key_value_heads, head_dim, is_gated)。
+    Attention 与 RoPE 统一使用该函数，保证两者 head_dim 一致。
+    混合架构下每个 hybrid_softmax_* 字段独立生效，未配置的字段回退到全局配置。
+    """
+    if is_hybrid_softmax:
+        num_heads = config.hybrid_softmax_num_heads or config.num_attention_heads
+        num_kv_heads = config.hybrid_softmax_num_kv_heads or config.num_key_value_heads or num_heads
+        head_dim = config.hybrid_softmax_head_dim or config.head_dim or (config.hidden_size // num_heads)
+        is_gated = config.hybrid_softmax_gated
+    else:
+        num_heads = config.num_attention_heads
+        num_kv_heads = config.num_key_value_heads or num_heads
+        head_dim = config.head_dim or (config.hidden_size // num_heads)
+        is_gated = False
+
+    return num_heads, num_kv_heads, head_dim, is_gated
 
 
 def _compute_default_rope_parameters(
@@ -35,7 +45,7 @@ def _compute_default_rope_parameters(
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
 
-    head_dim = _resolve_rope_head_dim(config)
+    _, _, head_dim, _ = _resolve_softmax_attn_dims(config, config.attention_type == 'hybrid')
     dim = int(head_dim * partial_rotary_factor)
 
     attention_factor = 1.0  # Unused in this type of RoPE
@@ -65,7 +75,7 @@ def _compute_dynamic_ntk_parameters(
     """
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
-    head_dim = _resolve_rope_head_dim(config)
+    _, _, head_dim, _ = _resolve_softmax_attn_dims(config, config.attention_type == 'hybrid')
 
     dim = int(head_dim * partial_rotary_factor)
     max_position_embeddings = config.max_position_embeddings
@@ -104,7 +114,7 @@ def _compute_yarn_parameters(
     """
     base = config.rope_config.rope_theta
     partial_rotary_factor = config.rope_config.partial_rotary_factor
-    head_dim = _resolve_rope_head_dim(config)
+    _, _, head_dim, _ = _resolve_softmax_attn_dims(config, config.attention_type == 'hybrid')
 
     dim = int(head_dim * partial_rotary_factor)
     factor = config.rope_config.factor

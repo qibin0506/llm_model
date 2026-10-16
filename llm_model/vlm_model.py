@@ -16,7 +16,7 @@ class MultiModalProjector(nn.Module):
 
         self.avg_pool = nn.AvgPool2d(kernel_size=self.kernel_size, stride=self.kernel_size)
 
-        self.vision_norm = RMSNorm(config.vision_hidden_size)
+        self.vision_norm = RMSNorm(config.vision_hidden_size, config.norm_eps)
 
         self.projector = nn.Sequential(
             nn.Linear(config.vision_hidden_size, config.hidden_size, bias=False),

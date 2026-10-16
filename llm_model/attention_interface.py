@@ -9,8 +9,7 @@ from .model_config import Config
 if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
     _SUPPORT_SDPA = True
     try:
-        _sdpa_params = inspect.signature(F.scaled_dot_product_attention).parameters
-        _SDPA_SUPPORT_GQA = 'enable_gqa' in _sdpa_params
+        _SDPA_SUPPORT_GQA = version.parse(torch.__version__).release >= version.parse("2.5").release
     except ValueError:
         _SDPA_SUPPORT_GQA = False
 else:

@@ -26,11 +26,22 @@ class ShortConvolution(nn.Module):
         self._smooth_initialization()
 
     def _smooth_initialization(self):
-        if self.conv.bias is not None:
-            nn.init.zeros_(self.conv.bias)
-        nn.init.normal_(self.conv.weight, mean=0.0, std=0.02)
-        with torch.no_grad():
-            self.conv.weight[:, 0, -1] += 1.0
+        if hasattr(self.conv.weight, "ds_id"):
+            import deepspeed
+            params = [self.conv.weight] + ([self.conv.bias] if self.conv.bias is not None else [])
+            with deepspeed.zero.GatheredParameters(params, modifier_rank=0):
+                if self.conv.bias is not None:
+                    nn.init.zeros_(self.conv.bias)
+                nn.init.normal_(self.conv.weight, mean=0.0, std=0.02)
+                with torch.no_grad():
+                    if self.conv.weight.ndim == 3:
+                        self.conv.weight[:, 0, -1] += 1.0
+        else:
+            if self.conv.bias is not None:
+                nn.init.zeros_(self.conv.bias)
+            nn.init.normal_(self.conv.weight, mean=0.0, std=0.02)
+            with torch.no_grad():
+                self.conv.weight[:, 0, -1] += 1.0
 
     def forward(self, x: torch.Tensor, conv_state: Optional[torch.Tensor] = None):
         x_t = x.transpose(1, 2)
@@ -45,6 +56,146 @@ class ShortConvolution(nn.Module):
             out = self.conv(x_padded).transpose(1, 2)
             new_conv_state = x_padded[:, :, -(self.kernel_size - 1):]
             return out, new_conv_state
+
+
+def l2norm(x: torch.Tensor, dim: int = -1, eps: float = 1e-6) -> torch.Tensor:
+    """与 FLA 库中的 l2norm 实现对齐: x * rsqrt(sum(x^2) + eps)"""
+    inv_norm = torch.rsqrt((x * x).sum(dim=dim, keepdim=True) + eps)
+    return x * inv_norm
+
+
+def torch_chunk_gated_delta_rule(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        g: torch.Tensor,
+        beta: torch.Tensor,
+        scale: float,
+        chunk_size: int = 64,
+        initial_state: Optional[torch.Tensor] = None,
+        output_final_state: bool = False,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """
+    分块 (chunk) 形式的 Gated Delta Rule 纯 PyTorch 实现
+    全程使用 float32 计算，输出转回输入 dtype，状态保持 float32。
+
+    Args:
+        q, k: (b, t, h, dk)，需已做 l2norm
+        v: (b, t, h, dv)
+        g: (b, t, h)，log 空间衰减 (<= 0)
+        beta: (b, t, h)
+        scale: q 的缩放系数
+    Returns:
+        out: (b, t, h, dv)
+        final_state: (b, h, dk, dv) 或 None
+    """
+    initial_dtype = q.dtype
+    q, k, v, beta, g = [x.transpose(1, 2).contiguous().to(torch.float32) for x in (q, k, v, beta, g)]
+
+    batch_size, num_heads, seq_len, k_head_dim = k.shape
+    v_head_dim = v.shape[-1]
+    pad_size = (chunk_size - seq_len % chunk_size) % chunk_size
+    q = F.pad(q, (0, 0, 0, pad_size))
+    k = F.pad(k, (0, 0, 0, pad_size))
+    v = F.pad(v, (0, 0, 0, pad_size))
+    beta = F.pad(beta, (0, pad_size))
+    g = F.pad(g, (0, pad_size))
+    total_seq_len = seq_len + pad_size
+
+    q = q * scale
+    v_beta = v * beta.unsqueeze(-1)
+    k_beta = k * beta.unsqueeze(-1)
+
+    # (b, h, n_chunks, chunk_size, d)
+    q, k, v, k_beta, v_beta = [
+        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1]) for x in (q, k, v, k_beta, v_beta)
+    ]
+    g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
+    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=q.device), diagonal=0)
+
+    # chunk 内累积衰减
+    g = g.cumsum(dim=-1)
+    decay_mask = ((g.unsqueeze(-1) - g.unsqueeze(-2)).tril().exp().float()).tril()
+    attn = -((k_beta @ k.transpose(-1, -2)) * decay_mask).masked_fill(mask, 0)
+    # 前代求解 (I + A)^-1 (下三角)
+    for i in range(1, chunk_size):
+        row = attn[..., i, :i].clone()
+        sub = attn[..., :i, :i].clone()
+        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
+    attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
+    v = attn @ v_beta
+    k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
+
+    last_state = (
+        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=v.dtype, device=v.device)
+        if initial_state is None
+        else initial_state.to(v)
+    )
+    out = torch.zeros_like(v)
+
+    for i in range(0, total_seq_len // chunk_size):
+        q_i, k_i, v_i = q[:, :, i], k[:, :, i], v[:, :, i]
+        # decay_mask 已经是下三角，上三角为 0
+        intra_attn = q_i @ k_i.transpose(-1, -2) * decay_mask[:, :, i]
+        v_prime = k_cumdecay[:, :, i] @ last_state
+        v_new = v_i - v_prime
+        attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_state
+        out[:, :, i] = attn_inter + intra_attn @ v_new
+        last_state = (
+            last_state * g[:, :, i, -1, None, None].exp()
+            + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
+        )
+
+    if not output_final_state:
+        last_state = None
+    out = out.reshape(out.shape[0], out.shape[1], -1, out.shape[-1])[:, :, :seq_len]
+    out = out.transpose(1, 2).contiguous().to(initial_dtype)
+    return out, last_state
+
+
+def torch_recurrent_gated_delta_rule(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        g: torch.Tensor,
+        beta: torch.Tensor,
+        scale: float,
+        initial_state: Optional[torch.Tensor] = None,
+        output_final_state: bool = False,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """
+    逐 token 递推形式的 Gated Delta Rule 纯 PyTorch 实现 (适用于 decode 阶段 t 很小的情况)。
+    参数与返回值同 `torch_chunk_gated_delta_rule`。
+    """
+    initial_dtype = q.dtype
+    q, k, v, beta, g = [x.transpose(1, 2).contiguous().to(torch.float32) for x in (q, k, v, beta, g)]
+
+    batch_size, num_heads, seq_len, k_head_dim = k.shape
+    v_head_dim = v.shape[-1]
+    q = q * scale
+
+    out = torch.zeros(batch_size, num_heads, seq_len, v_head_dim, dtype=v.dtype, device=v.device)
+    last_state = (
+        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=v.dtype, device=v.device)
+        if initial_state is None
+        else initial_state.to(v)
+    )
+
+    for i in range(seq_len):
+        q_t, k_t, v_t = q[:, :, i], k[:, :, i], v[:, :, i]
+        g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
+        beta_t = beta[:, :, i].unsqueeze(-1)
+
+        last_state = last_state * g_t
+        kv_mem = (last_state * k_t.unsqueeze(-1)).sum(dim=-2)
+        delta = (v_t - kv_mem) * beta_t
+        last_state = last_state + k_t.unsqueeze(-1) * delta.unsqueeze(-2)
+        out[:, :, i] = (last_state * q_t.unsqueeze(-1)).sum(dim=-2)
+
+    if not output_final_state:
+        last_state = None
+    out = out.transpose(1, 2).contiguous().to(initial_dtype)
+    return out, last_state
 
 
 class GatedDeltaNet(nn.Module):
@@ -63,8 +214,11 @@ class GatedDeltaNet(nn.Module):
         self.alpha_proj = nn.Linear(self.hidden_size, self.num_heads, bias=False)
         self.g_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
 
-        self.dt_bias = nn.Parameter(torch.zeros(self.num_heads))
-        self.A_log = nn.Parameter(torch.zeros(self.num_heads))
+        # dt_bias 初始化为 1，A ~ U(0.01, 16)，使不同 head 拥有不同的衰减速率 (多尺度记忆)
+        # A 的下界远离 0，保证 log(A) 不会变成 -inf
+        self.dt_bias = nn.Parameter(torch.ones(self.num_heads))
+        A = torch.empty(self.num_heads).uniform_(0.01, 16)
+        self.A_log = nn.Parameter(torch.log(A))
 
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self.g_norm = RMSNorm(self.head_dim, config.norm_eps)
@@ -91,8 +245,10 @@ class GatedDeltaNet(nn.Module):
         v = self.v_proj(hidden_states)
         g = self.g_proj(hidden_states)
 
-        beta = torch.sigmoid(self.beta_proj(hidden_states))
-        alpha_logits = self.alpha_proj(hidden_states)
+        # beta 与衰减 g_decay 在 float32 下计算，避免 fp16/bf16 下 exp(A_log) / softplus 精度不足
+        beta = torch.sigmoid(self.beta_proj(hidden_states).float())
+        alpha_logits = self.alpha_proj(hidden_states).float()
+        g_decay = -self.A_log.float().exp() * F.softplus(alpha_logits + self.dt_bias.float())  # (b, t, h)
 
         if padding_mask is not None:
             mask_t = padding_mask[:, -t:]
@@ -117,65 +273,39 @@ class GatedDeltaNet(nn.Module):
         v = F.silu(v).reshape(b, t, self.num_heads, self.head_dim)
         g = g.reshape(b, t, self.num_heads, self.head_dim)
 
-        dt = F.softplus(alpha_logits + self.dt_bias)
-        g_decay = -dt * torch.exp(self.A_log)
-        g_decay = g_decay.unsqueeze(-1)  # (b, t, h, 1)
-
         if padding_mask is not None:
-            mask_h = mask_t.unsqueeze(-1).to(q.dtype)  # (b, t, 1)
+            mask_h = mask_t.unsqueeze(-1).to(torch.float32)  # (b, t, 1)
             mask_hd = mask_t.unsqueeze(-1).unsqueeze(-1).to(q.dtype)  # (b, t, 1, 1)
 
             q = q * mask_hd
             k = k * mask_hd
             v = v * mask_hd
             g = g * mask_hd
+            # padding 位置: beta=0 不写入状态，g_decay=0 (exp(0)=1) 不衰减状态
             beta = beta * mask_h
+            g_decay = g_decay * mask_h
 
-            g_decay = g_decay * mask_hd
+        q = l2norm(q.float(), dim=-1, eps=1e-6).to(v.dtype)
+        k = l2norm(k.float(), dim=-1, eps=1e-6).to(v.dtype)
 
-        q = F.normalize(q.float(), p=2, dim=-1, eps=1e-6).to(q.dtype)
-        k = F.normalize(k.float(), p=2, dim=-1, eps=1e-6).to(k.dtype)
-
-        q = q * (self.head_dim ** -0.5)
-
+        # 缩放统一通过 kernel 的 scale 参数传入，避免与 FLA 内部默认的 K**-0.5 重复缩放
+        scale = self.head_dim ** -0.5
         initial_state = state_cache.get('recurrent_state') if state_cache is not None else None
+        output_final_state = use_cache or state_cache is not None
 
-        gd_impl = _get_gated_deltanet_impl(self.config)
+        gd_impl = _get_gated_deltanet_impl(self.config, q.device)
         if gd_impl == 'fla':
-            if t > 1:
-                out, final_state = chunk_gated_delta_rule(
-                    q=q, k=k, v=v, g=g_decay.squeeze(-1), beta=beta.squeeze(-1),
-                    initial_state=initial_state, output_final_state=True
-                )
-            else:
-                out, final_state = fused_recurrent_gated_delta_rule(
-                    q=q, k=k, v=v, g=g_decay.squeeze(-1), beta=beta.squeeze(-1),
-                    initial_state=initial_state, output_final_state=True
-                )
+            fla_kernel = chunk_gated_delta_rule if t > 1 else fused_recurrent_gated_delta_rule
+            out, final_state = fla_kernel(
+                q=q, k=k, v=v, g=g_decay, beta=beta.to(q.dtype), scale=scale,
+                initial_state=initial_state, output_final_state=output_final_state
+            )
         else:
-            alpha = torch.exp(g_decay)
-            if initial_state is None:
-                curr_state = torch.zeros(b, self.num_heads, self.head_dim, self.head_dim, device=q.device,
-                                         dtype=q.dtype)
-            else:
-                curr_state = initial_state
-
-            out_list = []
-            for i in range(t):
-                q_i, k_i, v_i = q[:, i], k[:, i], v[:, i]
-                a_i = alpha[:, i].unsqueeze(-1)  # (b, h, 1, 1)
-                b_i = beta[:, i].unsqueeze(-1)  # (b, h, 1)
-
-                curr_state = curr_state * a_i
-                v_pred = torch.einsum('bhk, bhkv -> bhv', k_i, curr_state)
-                v_err = v_i - v_pred
-                delta_s = torch.einsum('bhk, bhv -> bhkv', k_i, b_i * v_err)
-                curr_state = curr_state + delta_s
-                o_i = torch.einsum('bhk, bhkv -> bhv', q_i, curr_state)
-                out_list.append(o_i)
-
-            out = torch.stack(out_list, dim=1)
-            final_state = curr_state
+            torch_kernel = torch_chunk_gated_delta_rule if t > 1 else torch_recurrent_gated_delta_rule
+            out, final_state = torch_kernel(
+                q=q, k=k, v=v, g=g_decay, beta=beta, scale=scale,
+                initial_state=initial_state, output_final_state=output_final_state
+            )
 
         out = self.g_norm(out) * F.silu(g)
         out = out.reshape(b, t, -1)
@@ -183,16 +313,27 @@ class GatedDeltaNet(nn.Module):
 
         new_cache = {
             'recurrent_state': final_state, 'conv_q': new_cq_state, 'conv_k': new_ck_state, 'conv_v': new_cv_state,
-        } if (use_cache or state_cache is not None) else None
+        } if output_final_state else None
 
         return out, new_cache
 
 
-def _get_gated_deltanet_impl(config: Config) -> str:
+def _get_gated_deltanet_impl(config: Config, device: Optional[torch.device] = None) -> str:
+    """
+    选择 Gated DeltaNet 算子实现。FLA 基于 Triton，仅支持 CUDA 张量；
+    auto 模式下若张量不在 CUDA 上 (如 CPU / MPS)，自动回退到纯 PyTorch 实现。
+    """
     impl = config.gated_deltanet_implementation
-    if impl == 'fla' and not _SUPPORT_FLA:
-        raise RuntimeError('Please install fla')
-    if impl != 'auto':
-        if impl in _SUPPORT_IMPL:
-            return impl
-    return 'fla' if _SUPPORT_FLA else 'default'
+    on_cuda = device is None or device.type == 'cuda'
+
+    if impl == 'fla':
+        if not _SUPPORT_FLA:
+            raise RuntimeError('Please install fla')
+        if not on_cuda:
+            raise RuntimeError(f'fla kernels require CUDA tensors, but got device={device}')
+        return 'fla'
+
+    if impl == 'default':
+        return 'default'
+
+    return 'fla' if (_SUPPORT_FLA and on_cuda) else 'default'

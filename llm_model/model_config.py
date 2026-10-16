@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 from dataclasses import dataclass, field
 import torch
 
@@ -190,4 +190,3 @@ class VLMConfig(Config):
     tokens_per_image: int
     vision_hidden_size: int
     vision_tower: Callable[[torch.Tensor], torch.Tensor]
-
