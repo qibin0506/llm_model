@@ -69,21 +69,24 @@ class VlmModel(LlmModel):
             attention_mask: Optional[torch.Tensor] = None,
             **kwargs,
     ):
-        # if input_ids is not None and self.vlm_config.image_tok >= self.config.vocab_size:
-        #     special_image_mask = input_ids == self.vlm_config.image_tok
-        #     llm_input_ids = input_ids.clone()
-        #     llm_input_ids[special_image_mask] = self.vlm_config.padding_tok
-        # else:
-        #     llm_input_ids = input_ids
+        image_mask = (input_ids == self.vlm_config.image_tok) if input_ids is not None else None
+        if input_ids is not None and (self.vlm_config.image_tok >= self.config.vocab_size or self.vlm_config.image_tok < 0):
+            pad_tok = getattr(self.vlm_config, "padding_tok", 0)
+            safe_pad_id = pad_tok if (pad_tok is not None and 0 <= pad_tok < self.config.vocab_size) else 0
+            llm_input_ids = torch.where(
+                image_mask,
+                torch.tensor(safe_pad_id, dtype=input_ids.dtype, device=input_ids.device),
+                input_ids
+            )
+        else:
+            llm_input_ids = input_ids
 
-        inputs_embeds = self.embed_tokens(input_ids).clone()
+        inputs_embeds = self.embed_tokens(llm_input_ids)
 
         # pixel_values shape: (num_total_images, channels, height, width)
         pixel_values: Optional[torch.Tensor] = kwargs.get('pixel_values', None)
 
-        if pixel_values is not None:
-            # (batch_size, seq_len)
-            image_mask = (input_ids == self.vlm_config.image_tok)
+        if pixel_values is not None and image_mask is not None:
             num_image_tokens_in_text = image_mask.sum().item()
 
             if num_image_tokens_in_text > 0:
@@ -96,6 +99,10 @@ class VlmModel(LlmModel):
                 if num_image_tokens_in_text != num_image_features:
                     raise ValueError('num_image_tokens_in_text != num_image_features')
 
-                inputs_embeds[image_mask] = image_features.reshape(-1, image_features.shape[-1])
+                special_image_mask = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
+                inputs_embeds = inputs_embeds.masked_scatter(
+                    special_image_mask,
+                    image_features.reshape(-1, image_features.shape[-1])
+                )
 
         return inputs_embeds

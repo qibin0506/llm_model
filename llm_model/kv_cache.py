@@ -13,6 +13,34 @@ class KVCache:
         self.lengths = []
         self.seen_tokens = 0
 
+    def reset(self):
+        self.key_cache = []
+        self.value_cache = []
+        self.recurrent_cache.clear()
+        self.lengths = []
+        self.seen_tokens = 0
+
+    def get_cached_batch_size(self) -> Optional[int]:
+        for k in self.key_cache:
+            if k is not None:
+                return k.shape[0]
+        for state_dict in self.recurrent_cache.values():
+            if state_dict is not None:
+                first_tensor = next((v for v in state_dict.values() if isinstance(v, torch.Tensor)), None)
+                if first_tensor is not None:
+                    return first_tensor.shape[0]
+        return None
+
+    def check_and_reset_on_batch_shrink(self, current_batch: int) -> bool:
+        cached_batch = self.get_cached_batch_size()
+        if cached_batch is not None and (
+            cached_batch > current_batch
+            or (current_batch > cached_batch and current_batch % cached_batch != 0)
+        ):
+            self.reset()
+            return True
+        return False
+
     def get_seq_len(self, layer_idx: Optional[int] = None):
         if layer_idx is not None:
             if self.max_capacity > 0:
@@ -29,15 +57,30 @@ class KVCache:
 
         return self.seen_tokens
 
+    def _is_first_kv_layer(self, layer_idx: int) -> bool:
+        return all(k is None for k in self.key_cache[:layer_idx])
+
     def update(self, key_states, value_states, layer_idx):
+        input_seq_len = key_states.shape[-2]
+        current_batch = key_states.shape[0]
+
+        if len(self.key_cache) > layer_idx and self.key_cache[layer_idx] is not None:
+            old_batch = self.key_cache[layer_idx].shape[0]
+            if old_batch > current_batch or (current_batch > old_batch and current_batch % old_batch != 0):
+                for idx in range(len(self.key_cache)):
+                    if self.key_cache[idx] is not None and self.key_cache[idx].shape[0] == old_batch:
+                        self.key_cache[idx] = None
+                        self.value_cache[idx] = None
+                        if idx < len(self.lengths):
+                            self.lengths[idx] = 0
+                self.recurrent_cache.clear()
+                self.seen_tokens = 0
+
         if len(self.key_cache) <= layer_idx:
             for _ in range(len(self.key_cache), layer_idx + 1):
                 self.key_cache.append(None)
                 self.value_cache.append(None)
                 self.lengths.append(0)
-
-        input_seq_len = key_states.shape[-2]
-        current_batch = key_states.shape[0]
 
         if self.max_capacity > 0:
             current_len = self.lengths[layer_idx]
@@ -45,7 +88,11 @@ class KVCache:
             if self.key_cache[layer_idx] is None or self.key_cache[layer_idx].shape[0] != current_batch:
                 batch_size, num_heads, _, head_dim = key_states.shape
 
-                if self.key_cache[layer_idx] is not None and self.key_cache[layer_idx].shape[0] < current_batch:
+                if (
+                    self.key_cache[layer_idx] is not None
+                    and self.key_cache[layer_idx].shape[0] < current_batch
+                    and current_batch % self.key_cache[layer_idx].shape[0] == 0
+                ):
                     repeat_factor = current_batch // self.key_cache[layer_idx].shape[0]
                     old_keys = self.key_cache[layer_idx][..., :current_len, :]
                     old_vals = self.value_cache[layer_idx][..., :current_len, :]
@@ -76,6 +123,8 @@ class KVCache:
             self.value_cache[layer_idx][..., current_len:end_idx, :] = value_states
 
             self.lengths[layer_idx] = end_idx
+            if self._is_first_kv_layer(layer_idx):
+                self.seen_tokens = end_idx
 
             return (
                 self.key_cache[layer_idx][..., :end_idx, :],
@@ -86,17 +135,22 @@ class KVCache:
             self.key_cache[layer_idx] = key_states
             self.value_cache[layer_idx] = value_states
         else:
-            if self.key_cache[layer_idx].shape[0] < current_batch:
+            if self.key_cache[layer_idx].shape[0] < current_batch and current_batch % self.key_cache[layer_idx].shape[0] == 0:
                 repeat_factor = current_batch // self.key_cache[layer_idx].shape[0]
                 self.key_cache[layer_idx] = self.key_cache[layer_idx].repeat_interleave(repeat_factor, dim=0)
                 self.value_cache[layer_idx] = self.value_cache[layer_idx].repeat_interleave(repeat_factor, dim=0)
-            elif self.key_cache[layer_idx].shape[0] > current_batch:
+            elif self.key_cache[layer_idx].shape[0] != current_batch:
                 self.key_cache[layer_idx] = key_states
                 self.value_cache[layer_idx] = value_states
+                if self._is_first_kv_layer(layer_idx):
+                    self.seen_tokens = input_seq_len
                 return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
             self.key_cache[layer_idx] = torch.cat((self.key_cache[layer_idx], key_states), dim=-2)
             self.value_cache[layer_idx] = torch.cat((self.value_cache[layer_idx], value_states), dim=-2)
+
+        if self._is_first_kv_layer(layer_idx):
+            self.seen_tokens = self.key_cache[layer_idx].shape[-2]
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
@@ -106,17 +160,25 @@ class KVCache:
             return state_dict
 
         first_tensor = next((v for v in state_dict.values() if isinstance(v, torch.Tensor)), None)
-        if first_tensor is not None and first_tensor.shape[0] < current_batch:
-            if current_batch % first_tensor.shape[0] == 0:
-                repeat_factor = current_batch // first_tensor.shape[0]
-                expanded_dict = {}
-                for k, v in state_dict.items():
-                    if isinstance(v, torch.Tensor) and v.shape[0] < current_batch:
-                        expanded_dict[k] = v.repeat_interleave(repeat_factor, dim=0)
-                    else:
-                        expanded_dict[k] = v
-                self.recurrent_cache[layer_idx] = expanded_dict
-                return expanded_dict
+        if first_tensor is not None:
+            old_batch = first_tensor.shape[0]
+            if old_batch < current_batch:
+                if current_batch % old_batch == 0:
+                    repeat_factor = current_batch // old_batch
+                    expanded_dict = {}
+                    for k, v in state_dict.items():
+                        if isinstance(v, torch.Tensor) and v.shape[0] < current_batch:
+                            expanded_dict[k] = v.repeat_interleave(repeat_factor, dim=0)
+                        else:
+                            expanded_dict[k] = v
+                    self.recurrent_cache[layer_idx] = expanded_dict
+                    return expanded_dict
+                else:
+                    self.recurrent_cache.pop(layer_idx, None)
+                    return None
+            elif old_batch > current_batch:
+                self.recurrent_cache.pop(layer_idx, None)
+                return None
 
         return state_dict
 

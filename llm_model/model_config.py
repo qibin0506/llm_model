@@ -190,3 +190,4 @@ class VLMConfig(Config):
     tokens_per_image: int
     vision_hidden_size: int
     vision_tower: Callable[[torch.Tensor], torch.Tensor]
+    padding_tok: int = 0

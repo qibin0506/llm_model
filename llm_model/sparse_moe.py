@@ -44,7 +44,7 @@ class MoEGate(nn.Module):
             hidden_states.to(torch.float32), self.weight.to(torch.float32), None
         )
 
-        is_grad_training = self.training and torch.is_grad_enabled()
+        is_grad_training = self.training
         clean_logits = logits
         if is_grad_training and self.config.moe_config.router_jitter_noise > 0:
             noise = (torch.rand_like(logits) - 0.5) * 2.0 * self.config.moe_config.router_jitter_noise
@@ -84,7 +84,7 @@ class MoEGate(nn.Module):
                 # z_loss: log(sum(exp(x)))^2
                 z_loss = torch.logsumexp(clean_logits_valid, dim=-1).pow(2).mean() * self.config.moe_config.z_loss_coef
             else:
-                z_loss = torch.tensor(0.0, device=hidden_states.device, dtype=torch.float32)
+                z_loss = (clean_logits.sum() * 0.0).to(torch.float32)
 
             if self.seq_aux:
                 scores_for_seq_aux = scores.reshape(bsz, seq_len, -1)
@@ -113,7 +113,7 @@ class MoEGate(nn.Module):
                     fi = ce * self.n_routed_experts
                     aux_loss = (Pi * fi).sum()
                 else:
-                    aux_loss = torch.tensor(0.0, device=hidden_states.device, dtype=torch.float32)
+                    aux_loss = (scores.sum() * 0.0).to(torch.float32)
 
             aux_loss = aux_loss * self.config.moe_config.aux_loss_coef
             aux_loss += z_loss
@@ -171,8 +171,8 @@ class MoE(nn.Module):
 
         hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
 
-        if self.training and torch.is_grad_enabled():
-            y = torch.zeros( hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
+        if self.training:
+            y = torch.zeros(hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
 
             for i, expert in enumerate(self.experts):
                 batch_token_idx, k_idx = torch.where(topk_idx == i)
@@ -185,6 +185,10 @@ class MoE(nn.Module):
                     weighted_output = expert_output * weights.to(expert_output.dtype)
 
                     y.index_add_(0, batch_token_idx, weighted_output.to(y.dtype))
+                else:
+                    # 确保未被路由选中的专家在所有 Rank 上同样执行前向并挂载到 Autograd 图，防止 DDP / ZeRO-3 死锁
+                    dummy_output = expert(hidden_states[:0])
+                    y = y + (dummy_output.sum() * 0.0).to(y.dtype)
 
             y = y.reshape(*orig_shape)
         else:
@@ -218,9 +222,10 @@ class MoE(nn.Module):
         start_idx = 0
         for i, num_tokens in enumerate(tokens_per_expert):
             end_idx = start_idx + num_tokens
-            if num_tokens == 0:
-                continue
             expert = self.experts[i]
+            if num_tokens == 0:
+                _ = expert(sorted_tokens[:0])
+                continue
             tokens_for_this_expert = sorted_tokens[start_idx:end_idx]
             expert_out = expert(tokens_for_this_expert)
             outputs.append(expert_out)

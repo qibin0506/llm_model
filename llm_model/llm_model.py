@@ -444,6 +444,7 @@ class LlmModel(nn.Module):
             use_cache: bool = False,
             return_logits: bool = True,
             logits_to_keep: Optional[int] = None,
+            has_padding: Optional[bool] = None,
             **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -461,6 +462,9 @@ class LlmModel(nn.Module):
                 use KVCache or not
             return_logits (`bool`, default is True):
                 return logits if needed
+            has_padding (`bool`, *optional*, default is None):
+                Python bool flag computed on CPU (e.g. in DataCollator) indicating whether the batch contains padding,
+                avoiding GPU-CPU sync (`attention_mask.all().item()`) during forward.
 
         Returns:
             logits
@@ -483,11 +487,13 @@ class LlmModel(nn.Module):
         inputs_embeds = self.get_input_embeddings(input_ids, attention_mask, **kwargs)
 
         # seq_len
+        if past_key_values is not None:
+            past_key_values.check_and_reset_on_batch_shrink(batch_size)
         past_seen_tokens = past_key_values.get_seq_len() if past_key_values is not None else 0
         full_seq_len = past_seen_tokens + seq_len
 
         if position_ids is None:
-            if attention_mask is not None and attention_mask.shape[-1] == full_seq_len:
+            if attention_mask is not None and has_padding is not False and attention_mask.shape[-1] == full_seq_len:
                 position_ids = (attention_mask.long().cumsum(dim=-1) - 1).clamp(min=0)
                 position_ids = position_ids[:, -seq_len:]
             else:
@@ -509,8 +515,8 @@ class LlmModel(nn.Module):
         if self.config.attention_type == 'gated_deltanet':
             can_skip_causal_matrix = True
         elif seq_len > 1 and past_seen_tokens == 0 and supports_fused_causal_mask(self.config):
-            if attention_mask is None or bool(attention_mask.all()):
-                # 无 Padding 时直接走 SDPA is_causal=True (启用 FlashAttention-2)，省去 [B, 1, S, S] 显存
+            if attention_mask is None or has_padding is False:
+                # 无 Padding 时直接走 SDPA is_causal=True (启用 FlashAttention-2)，省去 [B, 1, S, S] 显存，且零 GPU-CPU 同步开销
                 can_skip_causal_matrix = True
 
         if can_skip_causal_matrix:
@@ -584,7 +590,17 @@ class LlmModel(nn.Module):
             head = None
 
         if past_key_values is not None:
-            past_key_values.seen_tokens = full_seq_len
+            active_kv_idx = next(
+                (idx for idx, k in enumerate(past_key_values.key_cache) if k is not None),
+                None
+            )
+            if active_kv_idx is not None:
+                if past_key_values.max_capacity > 0 and active_kv_idx < len(past_key_values.lengths):
+                    past_key_values.seen_tokens = past_key_values.lengths[active_kv_idx]
+                else:
+                    past_key_values.seen_tokens = past_key_values.key_cache[active_kv_idx].shape[-2]
+            else:
+                past_key_values.seen_tokens = full_seq_len
 
         return {
             'logits': head,
